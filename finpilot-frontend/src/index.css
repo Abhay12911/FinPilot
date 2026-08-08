@@ -1,0 +1,17 @@
+@import url('https://fonts.cdnfonts.com/css/product-sans');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: 'Product Sans', sans-serif;
+  --font-serif: 'Product Sans', sans-serif;
+}
+
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: 5.5rem;
+}
+
+/* Custom premium styles */
+.text-balance {
+  text-wrap: balance;
+}
