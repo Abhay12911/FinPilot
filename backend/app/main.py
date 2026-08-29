@@ -12,3 +12,4 @@ def root():
     return {
         "message": "FinPilot API is running"
     }
+
