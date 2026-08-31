@@ -89,10 +89,10 @@ export const MarketOverview = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState(new Date());
 
-  const fetchStatusData = useCallback(async () => {
+  const fetchStatusData = useCallback(async (force = false) => {
     try {
       setLoadingStatus(true);
-      const data = await getMarketStatus();
+      const data = await getMarketStatus(force);
       setStatus(data);
       setErrors(prev => ({ ...prev, status: null }));
     } catch (e) {
@@ -102,10 +102,10 @@ export const MarketOverview = () => {
     }
   }, []);
 
-  const fetchIndicesData = useCallback(async () => {
+  const fetchIndicesData = useCallback(async (force = false) => {
     try {
       setLoadingIndices(true);
-      const data = await getMarketIndices();
+      const data = await getMarketIndices(force);
       setIndices(data);
       setErrors(prev => ({ ...prev, indices: null }));
     } catch (e) {
@@ -115,10 +115,10 @@ export const MarketOverview = () => {
     }
   }, []);
 
-  const fetchMoversData = useCallback(async (market) => {
+  const fetchMoversData = useCallback(async (market, force = false) => {
     try {
       setLoadingMovers(true);
-      const data = await getMarketMovers(market);
+      const data = await getMarketMovers(market, force);
       setMovers(data);
       setErrors(prev => ({ ...prev, movers: null }));
     } catch (e) {
@@ -128,10 +128,10 @@ export const MarketOverview = () => {
     }
   }, []);
 
-  const fetchSectorsData = useCallback(async (market) => {
+  const fetchSectorsData = useCallback(async (market, force = false) => {
     try {
       setLoadingSectors(true);
-      const data = await getSectorPerformance(market);
+      const data = await getSectorPerformance(market, force);
       setSectors(data);
       setErrors(prev => ({ ...prev, sectors: null }));
     } catch (e) {
@@ -253,13 +253,14 @@ export const MarketOverview = () => {
     return () => document.removeEventListener('mousedown', handleOutsideClick);
   }, []);
 
-  const handleRefresh = async () => {
+  const handleRefresh = useCallback(async (force = true) => {
+    if (refreshing) return;
     setRefreshing(true);
     await Promise.allSettled([
-      fetchStatusData(),
-      fetchIndicesData(),
-      fetchMoversData(moversMarket),
-      fetchSectorsData(sectorsMarket),
+      fetchStatusData(force),
+      fetchIndicesData(force),
+      fetchMoversData(moversMarket, force),
+      fetchSectorsData(sectorsMarket, force),
       fetchHistoryData(chartIndex, chartTimeframe),
       fetchForexData(),
       fetchCommoditiesData(),
@@ -267,20 +268,15 @@ export const MarketOverview = () => {
     ]);
     setLastUpdated(new Date());
     setRefreshing(false);
-  };
+  }, [chartIndex, chartTimeframe, fetchCommoditiesData, fetchForexData, fetchHistoryData, fetchIndicesData, fetchMoversData, fetchSectorsData, fetchSignalsData, fetchStatusData, moversMarket, refreshing, sectorsMarket]);
 
   useEffect(() => {
     const checkAndPoll = setInterval(() => {
-      const isIndiaOpen = status?.india?.status === 'open';
-      const isUsaOpen = status?.usa?.status === 'open';
-      if (isIndiaOpen || isUsaOpen) {
-        console.log('[FinPilot] Market is open. Auto-refreshing quotes...');
-        handleRefresh();
-      }
-    }, 60000); 
+      if (document.visibilityState === 'visible') handleRefresh(true);
+    }, 60000);
 
     return () => clearInterval(checkAndPoll);
-  }, [status]);
+  }, [handleRefresh]);
 
   const allIndices = [
     ...indices.india,
@@ -409,7 +405,7 @@ export const MarketOverview = () => {
             </div>
 
             <span className="text-[#ADADAD] text-[11px] ml-auto">
-              Last check: {lastUpdated.toLocaleTimeString()}
+              Data refreshed · {lastUpdated.toLocaleTimeString()}
             </span>
           </>
         )}

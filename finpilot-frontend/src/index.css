@@ -1,9 +1,9 @@
-@import url('https://fonts.cdnfonts.com/css/product-sans');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
 @import "tailwindcss";
 
 @theme {
-  --font-sans: 'Product Sans', sans-serif;
-  --font-serif: 'Product Sans', sans-serif;
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
 }
 
 html {
@@ -11,7 +11,291 @@ html {
   scroll-padding-top: 5.5rem;
 }
 
-/* Custom premium styles */
-.text-balance {
-  text-wrap: balance;
+/* ============================================================
+   GLOBAL RESETS & BASE
+   ============================================================ */
+*, *::before, *::after {
+  box-sizing: border-box;
 }
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ============================================================
+   SCROLLBARS — ultra-thin, premium feel
+   ============================================================ */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* ============================================================
+   SIDEBAR — dark, premium, deep navy
+   ============================================================ */
+.sidebar-dark {
+  background: linear-gradient(180deg, #0b0f1a 0%, #111827 100%);
+  border-right: 1px solid rgba(255,255,255,0.06);
+}
+
+.sidebar-dark .sidebar-brand-logo {
+  background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+  box-shadow: 0 0 20px rgba(59, 130, 246, 0.4);
+}
+
+.sidebar-dark .sidebar-nav-item {
+  color: rgba(255,255,255,0.55);
+  transition: all 0.15s ease;
+  border-radius: 8px;
+  position: relative;
+}
+
+.sidebar-dark .sidebar-nav-item:hover {
+  color: rgba(255,255,255,0.95);
+  background: rgba(255,255,255,0.06);
+}
+
+.sidebar-dark .sidebar-nav-item.active {
+  color: #fff;
+  background: rgba(59, 130, 246, 0.15);
+  box-shadow: inset 3px 0 0 #3b82f6;
+}
+
+.sidebar-dark .sidebar-nav-item.active .sidebar-icon {
+  color: #60a5fa;
+}
+
+.sidebar-dark .sidebar-section-label {
+  color: rgba(255,255,255,0.25);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.sidebar-dark .sidebar-divider {
+  border-color: rgba(255,255,255,0.07);
+}
+
+.sidebar-dark .sidebar-footer {
+  border-top: 1px solid rgba(255,255,255,0.07);
+  background: rgba(0,0,0,0.2);
+}
+
+.sidebar-dark .sidebar-user-avatar {
+  background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+}
+
+/* ============================================================
+   TOPBAR
+   ============================================================ */
+.topbar {
+  background: #ffffff;
+  border-bottom: 1px solid #f0f0f0;
+  box-shadow: 0 1px 0 rgba(0,0,0,0.04);
+}
+
+/* ============================================================
+   TICKER STRIP — scrolling marquee
+   ============================================================ */
+@keyframes ticker-scroll {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+.ticker-track {
+  display: flex;
+  animation: ticker-scroll 40s linear infinite;
+  will-change: transform;
+}
+
+.ticker-track:hover {
+  animation-play-state: paused;
+}
+
+/* ============================================================
+   CARDS
+   ============================================================ */
+.card {
+  background: #ffffff;
+  border: 1px solid #f0f0f0;
+  border-radius: 16px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.card:hover {
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 1px 3px rgba(0,0,0,0.05);
+  border-color: #e5e7eb;
+}
+
+.card-glass {
+  background: rgba(255,255,255,0.8);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255,255,255,0.9);
+}
+
+/* ============================================================
+   STATUS BADGES
+   ============================================================ */
+.status-open {
+  background: #dcfce7;
+  color: #15803d;
+  border: 1px solid #bbf7d0;
+}
+
+.status-closed {
+  background: #f1f5f9;
+  color: #64748b;
+  border: 1px solid #e2e8f0;
+}
+
+.badge-bull {
+  background: #dcfce7;
+  color: #15803d;
+  border: 1px solid #bbf7d0;
+}
+
+.badge-bear {
+  background: #fee2e2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+
+.badge-neutral {
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #e2e8f0;
+}
+
+/* ============================================================
+   CHANGE COLORS
+   ============================================================ */
+.text-gain { color: #16a34a; }
+.text-loss { color: #dc2626; }
+.bg-gain { background: #dcfce7; }
+.bg-loss { background: #fee2e2; }
+.pill-gain { background: #dcfce7; color: #15803d; border-radius: 6px; padding: 2px 8px; font-weight: 700; font-size: 11px; }
+.pill-loss { background: #fee2e2; color: #b91c1c; border-radius: 6px; padding: 2px 8px; font-weight: 700; font-size: 11px; }
+
+/* ============================================================
+   MINI SPARKLINE BARS (inline)
+   ============================================================ */
+.sparkbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 1.5px;
+  height: 20px;
+}
+.sparkbar span {
+  width: 3px;
+  border-radius: 2px 2px 0 0;
+  background: #3b82f6;
+  opacity: 0.7;
+}
+
+/* ============================================================
+   TABLE STYLES
+   ============================================================ */
+.data-table { width: 100%; border-collapse: collapse; }
+.data-table th {
+  font-size: 10px;
+  font-weight: 600;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 8px 12px;
+  border-bottom: 1px solid #f1f5f9;
+  text-align: left;
+  background: #fafafa;
+}
+.data-table td {
+  padding: 10px 12px;
+  font-size: 13px;
+  border-bottom: 1px solid #f8fafc;
+  color: #1e293b;
+}
+.data-table tr:last-child td { border-bottom: none; }
+.data-table tbody tr { cursor: pointer; transition: background 0.1s; }
+.data-table tbody tr:hover { background: #f8fafc; }
+
+/* ============================================================
+   PERCENT BAR (inline progress bar for movers)
+   ============================================================ */
+.pct-bar-wrap {
+  height: 4px;
+  background: #f1f5f9;
+  border-radius: 99px;
+  overflow: hidden;
+  flex: 1;
+  max-width: 80px;
+}
+.pct-bar { height: 100%; border-radius: 99px; transition: width 0.7s ease; }
+.pct-bar.gain { background: linear-gradient(90deg, #22c55e, #16a34a); }
+.pct-bar.loss { background: linear-gradient(90deg, #f87171, #dc2626); }
+
+/* ============================================================
+   SECTOR PERFORMANCE BAR
+   ============================================================ */
+.sector-bar-track {
+  height: 6px;
+  background: #f1f5f9;
+  border-radius: 99px;
+  overflow: hidden;
+}
+.sector-bar-fill {
+  height: 100%;
+  border-radius: 99px;
+  transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ============================================================
+   PAGE ENTER ANIMATION
+   ============================================================ */
+@keyframes page-fade-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.page-enter {
+  animation: page-fade-up 0.35s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+/* ============================================================
+   SIGNALS CARDS
+   ============================================================ */
+.signal-card {
+  border-radius: 14px;
+  border: 1px solid #f0f0f0;
+  padding: 18px;
+  transition: all 0.2s ease;
+  background: white;
+}
+.signal-card:hover {
+  border-color: #cbd5e1;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.07);
+  transform: translateY(-1px);
+}
+.signal-card.bull { border-left: 3px solid #22c55e; }
+.signal-card.bear { border-left: 3px solid #ef4444; }
+.signal-card.neutral { border-left: 3px solid #94a3b8; }
+
+/* ============================================================
+   FOCUS RING
+   ============================================================ */
+.focus-ring:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+}
+
+/* ============================================================
+   MISC UTILS
+   ============================================================ */
+.text-balance { text-wrap: balance; }
+.transition-fast { transition: all 0.15s ease; }
+.rounded-xl { border-radius: 16px; }

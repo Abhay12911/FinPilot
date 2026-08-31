@@ -4,6 +4,7 @@ import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Loader2, AlertCircle, Eye, EyeOff, Check } from 'lucide-react';
 import AuthLayout, { AuthDivider, AuthField } from '../components/shared/AuthLayout';
+import { useAuth } from '../context/AuthContext';
 
 function strengthOf(pw) {
   let score = 0;
@@ -20,6 +21,7 @@ const STRENGTH_COLORS = ['#D4D4D4', '#A3A3A3', '#737373', '#404040', '#050505'];
 export default function SignupPage({ onLoginSuccess }) {
   const navigate = useNavigate();
   const location = useLocation();
+  const { signup: authSignup } = useAuth();
 
   const [name, setName] = useState('');
   const [username, setUsername] = useState('');
@@ -55,10 +57,15 @@ export default function SignupPage({ onLoginSuccess }) {
     }
 
     setLoading(true);
-    setTimeout(() => {
+    try {
+      const userData = await authSignup(email, password, name, role);
+      if (onLoginSuccess) onLoginSuccess(userData, userData.token);
+      navigate('/dashboard');
+    } catch (err) {
+      setError(err.message || 'Registration failed');
+    } finally {
       setLoading(false);
-      finish({ email }, 'mock-token');
-    }, 1000);
+    }
   };
 
   const handleGoogle = async (credentialResponse) => {
