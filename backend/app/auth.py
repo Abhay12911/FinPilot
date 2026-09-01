@@ -10,7 +10,7 @@ from starlette import status
 from jose import jwt, JWTError
 from pwdlib import PasswordHash
 
-from app.database import get_db, settings
+from app.database import get_db, settings, SessionLocal
 from app.models.user import User
 
 
@@ -24,6 +24,7 @@ router = APIRouter(
 # JWT CONFIG
 
 
+SECRET_KEY = "CHANGE_THIS_TO_A_RANDOM_SECRET"
 ALGORITHM = "HS256"
 
 oauth2_bearer = OAuth2PasswordBearer(
@@ -240,4 +241,5 @@ async def get_me(
         Depends(get_current_user)
     ]
 ):
+    return current_user
     return current_user
