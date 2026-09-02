@@ -10,7 +10,7 @@ from starlette import status
 from jose import jwt, JWTError
 from pwdlib import PasswordHash
 
-from app.database import SessionLocal
+from app.database import get_db, settings, SessionLocal
 from app.models.user import User
 
 
@@ -53,17 +53,6 @@ class CreateUserRequest(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str
-
-# DATABASE DEPENDENCY
-
-def get_db():
-    db = SessionLocal()
-
-    try:
-        yield db
-    finally:
-        db.close()
-
 
 db_dependency = Annotated[
     Session,
@@ -116,7 +105,7 @@ def create_access_token(
 
     return jwt.encode(
         payload,
-        SECRET_KEY,
+        settings.SECRET_KEY,
         algorithm=ALGORITHM
     )
 
@@ -131,7 +120,7 @@ async def get_current_user(
     try:
         payload = jwt.decode(
             token,
-            SECRET_KEY,
+            settings.SECRET_KEY,
             algorithms=[ALGORITHM]
         )
 
@@ -252,4 +241,5 @@ async def get_me(
         Depends(get_current_user)
     ]
 ):
+    return current_user
     return current_user

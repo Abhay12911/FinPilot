@@ -4,9 +4,11 @@ import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { AlertCircle, Eye, EyeOff, Loader2 } from 'lucide-react';
 import AuthLayout, { AuthDivider, AuthField } from '../components/shared/AuthLayout';
+import { useAuth } from '../context/AuthContext';
 
 export default function LoginPage({ onLoginSuccess }) {
   const navigate = useNavigate();
+  const { login: authLogin } = useAuth();
   const [login, setLogin] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -22,10 +24,15 @@ export default function LoginPage({ onLoginSuccess }) {
     e.preventDefault();
     setError('');
     setLoading(true);
-    setTimeout(() => {
+    try {
+      const userData = await authLogin(login, password);
+      if (onLoginSuccess) onLoginSuccess(userData, userData.token);
+      navigate('/dashboard');
+    } catch (err) {
+      setError(err.message || 'Incorrect email or password');
+    } finally {
       setLoading(false);
-      finish({ email: login }, 'mock-token');
-    }, 1000);
+    }
   };
 
   const handleGoogle = async (credentialResponse) => {

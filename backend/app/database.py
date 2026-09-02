@@ -4,10 +4,14 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    DATABASE_URL: str
+    DATABASE_URL: str = "sqlite:///./finpilot.db"
+    SECRET_KEY: str = "CHANGE_THIS_TO_A_RANDOM_SECRET_KEY"
+    ALPHA_VANTAGE_KEY: str = ""
+    TWELVE_DATA_KEY: str = "demo"
 
     class Config:
         env_file = ".env"
+        extra = "ignore"
 
 
 settings = Settings()

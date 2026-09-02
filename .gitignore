@@ -1,0 +1,63 @@
+# ==============================================================================
+# FinPilot Root Gitignore
+# ==============================================================================
+
+# IDEs and Editors
+.vscode/
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.DS_Store
+Thumbs.db
+
+# Logs and debugs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Python / Backend
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+*.pyc
+__pycache__/
+.pytest_cache/
+
+# Databases (Development SQLite)
+*.db
+*.sqlite
+*.sqlite3
+backend/finpilot.db
+
+# Private Configuration
+backend/.env
+backend/*.local
+
+# ──────────────────────────────────────────────────────────────────────────────
+# React / Frontend
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Package managers
+finpilot-frontend/node_modules/
+
+# Production builds
+finpilot-frontend/dist/
+finpilot-frontend/dist-ssr/
+
+# Private Configuration
+finpilot-frontend/.env
+finpilot-frontend/.env.production
+finpilot-frontend/*.local

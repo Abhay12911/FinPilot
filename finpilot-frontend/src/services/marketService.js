@@ -25,20 +25,20 @@ async function apiRequest(path, options = {}) {
   return res.json();
 }
 
-export const getMarketStatus = () => {
-  return apiRequest('/api/v1/market/status');
+export const getMarketStatus = (force = false) => {
+  return apiRequest(`/api/v1/market/status${force ? '?force=true' : ''}`);
 };
 
-export const getMarketIndices = () => {
-  return apiRequest('/api/v1/market/indices');
+export const getMarketIndices = (force = false) => {
+  return apiRequest(`/api/v1/market/indices${force ? '?force=true' : ''}`);
 };
 
-export const getMarketMovers = (market) => {
-  return apiRequest(`/api/v1/market/movers?market=${market}`);
+export const getMarketMovers = (market, force = false) => {
+  return apiRequest(`/api/v1/market/movers?market=${market}${force ? '&force=true' : ''}`);
 };
 
-export const getSectorPerformance = (market) => {
-  return apiRequest(`/api/v1/market/sectors?market=${market}`);
+export const getSectorPerformance = (market, force = false) => {
+  return apiRequest(`/api/v1/market/sectors?market=${market}${force ? '&force=true' : ''}`);
 };
 
 export const getMarketHistory = (symbol, interval = '1day', outputsize = 100) => {
