@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Sparkles, CheckCircle2, Circle, Loader2, ChevronDown, ChevronRight, Download, Copy, Share2 } from 'lucide-react';
 import { runDeepResearch, addResearchReport } from '../services/research';
+import { getCompanyDetails, getCompanyNews } from '../services/companies';
 
 const RESEARCH_STEPS = [
   { id: 'company', label: 'Company information' },
@@ -19,13 +20,7 @@ const AGENTS = [
   { id: 'risk', name: 'Risk Agent', role: 'Evaluating company & market risks' },
 ];
 
-const MOCK_REPORT = {
-  executiveSummary: 'NVIDIA Corporation has established dominant market leadership in AI accelerator hardware through its CUDA ecosystem and Hopper GPU architecture. Revenue grew 122% YoY to $44.1B in FY2025, driven by insatiable demand from hyperscalers and enterprise AI deployments.',
-  financialAnalysis: 'Data Center segment revenues reached $30.8B, representing 70% of total revenue. Gross margins expanded to 76.0%, reflecting strong pricing power. Operating income surged to $23.7B with 54% operating margins.',
-  growthDrivers: ['Generative AI infrastructure buildout', 'Enterprise AI adoption acceleration', 'Sovereign AI government initiatives', 'Automotive & robotics AI expansion'],
-  risks: ['Export control restrictions on China sales', 'Custom silicon competition from hyperscalers', 'Cyclical semiconductor demand patterns', 'Valuation premium compression risk'],
-  conclusion: 'NVIDIA remains a strong long-term compounder, though near-term risk/reward depends on sustainability of AI capex spending by hyperscalers. Monitor export control developments closely.',
-};
+// Report content is generated dynamically now.
 
 export const AIResearch = () => {
   const [stage, setStage] = useState('configure'); 
@@ -43,8 +38,30 @@ export const AIResearch = () => {
   const [agents, setAgents] = useState(AGENTS.map(a => ({ ...a, status: 'queued', progress: 0 })));
   const [expandedSection, setExpandedSection] = useState('executiveSummary');
 
+  const [dynamicReport, setDynamicReport] = useState(null);
+
   const handleStartResearch = async () => {
     setStage('researching');
+    
+    let compData = null;
+    let compNews = [];
+    try {
+      [compData, compNews] = await Promise.all([
+        getCompanyDetails(config.ticker),
+        getCompanyNews(config.ticker).catch(() => [])
+      ]);
+    } catch (error) {
+      console.error("Failed to fetch data for research:", error);
+      // Fallback if the ticker is totally invalid
+      compData = {
+        name: config.company || config.ticker,
+        ticker: config.ticker,
+        about: "Information not available for this ticker.",
+        financials: { revenue: "N/A", netIncome: "N/A" },
+        metrics: { peRatio: "N/A", beta: "N/A" }
+      };
+    }
+
     await runDeepResearch(config);
 
     for (let i = 0; i < steps.length; i++) {
@@ -63,34 +80,45 @@ export const AIResearch = () => {
 
     await new Promise(r => setTimeout(r, 800));
     setSteps(prev => prev.map(s => ({ ...s, status: 'complete' })));
+    
+    // Generate Report dynamically based on fetched data
+    const generatedReport = {
+      executiveSummary: `${compData.name} (${compData.ticker}) overview:\n${compData.about || 'Company overview not available.'}`,
+      financialAnalysis: `Key Financial Highlights (TTM):\n• Revenue: ${compData.financials?.revenue || 'N/A'}\n• Net Income: ${compData.financials?.netIncome || 'N/A'}\n• Gross Margin: ${compData.financials?.grossMargin || 'N/A'}\n\nValuation Metrics:\n• P/E Ratio: ${compData.metrics?.peRatio || 'N/A'}\n• Beta: ${compData.metrics?.beta || 'N/A'}`,
+      growthDrivers: compNews.length > 0 
+        ? compNews.slice(0, 4).map(n => `• ${n.title}`).join('\n') 
+        : '• Insufficient recent news to determine growth drivers.',
+      risks: `• Beta of ${compData.metrics?.beta || 'N/A'} suggests market correlation risks.\n• Valuation risks at P/E of ${compData.metrics?.peRatio || 'N/A'}.\n• General macroeconomic sensitivities.`,
+      conclusion: `Based on available data, ${compData.ticker} presents a profile with a P/E of ${compData.metrics?.peRatio || 'N/A'} and ${compData.financials?.revenueGrowth || 'N/A'} revenue growth. Monitor market conditions and upcoming earnings.`
+    };
+    setDynamicReport(generatedReport);
     setStage('report');
 
+    // Build the full markdown content string from the generated sections
+    const fullContent = [
+      `# ${compData.name || config.company} (${(config.ticker || 'GEN').toUpperCase()}) — Deep Research Report`,
+      `## Executive Summary\n${generatedReport.executiveSummary}`,
+      `## Financial Analysis\n${generatedReport.financialAnalysis}`,
+      `## Growth Drivers & News\n${generatedReport.growthDrivers}`,
+      `## Risk Analysis\n${generatedReport.risks}`,
+      `## Conclusion\n${generatedReport.conclusion}`,
+    ].join('\n\n');
+
     await addResearchReport({
-      id: 'rpt-' + Date.now(),
-      company: config.company || 'Generic Corp',
       ticker: (config.ticker || 'GEN').toUpperCase(),
-      type: 'Deep Research',
-      date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-      riskLevel: 'Medium',
-      summary: `AI generated deep research report for ${config.company || 'Generic Corp'}.`,
-      sources: 30 + Math.floor(Math.random() * 20),
-      sections: 11
+      title: `${compData.name || config.company} (${(config.ticker || 'GEN').toUpperCase()}) — Deep Research Report`,
+      summary: `AI-generated deep research covering financials, growth drivers, and risks for ${compData.name || config.company}.`,
+      content: fullContent,
     });
   };
 
-  const reportSections = [
-    { id: 'executiveSummary', label: 'Executive Summary', agent: 'Coordinator', content: MOCK_REPORT.executiveSummary },
-    { id: 'financialAnalysis', label: 'Financial Analysis', agent: 'Financial Agent', content: MOCK_REPORT.financialAnalysis },
-    {
-      id: 'growthDrivers', label: 'Growth Drivers', agent: 'Financial Agent',
-      content: MOCK_REPORT.growthDrivers.map(d => `• ${d}`).join('\n')
-    },
-    {
-      id: 'risks', label: 'Risk Analysis', agent: 'Risk Agent',
-      content: MOCK_REPORT.risks.map(r => `• ${r}`).join('\n')
-    },
-    { id: 'conclusion', label: 'Conclusion', agent: 'Coordinator', content: MOCK_REPORT.conclusion },
-  ];
+  const reportSections = dynamicReport ? [
+    { id: 'executiveSummary', label: 'Executive Summary', agent: 'Coordinator', content: dynamicReport.executiveSummary },
+    { id: 'financialAnalysis', label: 'Financial Analysis', agent: 'Financial Agent', content: dynamicReport.financialAnalysis },
+    { id: 'growthDrivers', label: 'Growth Drivers & News', agent: 'News Agent', content: dynamicReport.growthDrivers },
+    { id: 'risks', label: 'Risk Analysis', agent: 'Risk Agent', content: dynamicReport.risks },
+    { id: 'conclusion', label: 'Conclusion', agent: 'Coordinator', content: dynamicReport.conclusion },
+  ] : [];
 
   return (
     <div className="p-8 max-w-[1400px] mx-auto space-y-6">

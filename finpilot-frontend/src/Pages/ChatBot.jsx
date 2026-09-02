@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Send, Sparkles, User, FileText, Search, Copy, RefreshCw, Plus, ChevronDown, X } from 'lucide-react';
+import { getToken } from '../services/api';
 
 const INITIAL_MESSAGES = [
   {
@@ -26,12 +27,6 @@ const CHAT_HISTORY = [
   { id: 5, title: 'Fed Rate Impact Analysis', date: 'Aug 25', active: false },
 ];
 
-const MOCK_RESPONSES = [
-  `Based on the latest earnings reports and market data, **NVIDIA's revenue increased 427% year-over-year** primarily due to massive demand for Hopper architecture GPUs (H100) from hyperscalers training generative AI models.\n\n**Key Drivers:**\n- Data Center revenue: $47.5B (up 427% YoY)\n- Gaming segment: $2.9B (modest recovery)\n- AI inference & training workloads driving demand\n\n**Forward Outlook:** Management guided for continued strong growth as AI infrastructure buildout accelerates globally. The Blackwell architecture (B100/B200) is expected to further expand their addressable market.`,
-  `Here's a comprehensive comparison of **Apple vs Microsoft** across key financial metrics:\n\n| Metric | Apple (AAPL) | Microsoft (MSFT) |\n|--------|------|------|\n| Revenue | $383B | $245B |\n| Gross Margin | 44.1% | 70.1% |\n| Operating Income | $115B | $109B |\n| P/E Ratio | 31x | 38x |\n| Dividend Yield | 0.5% | 0.7% |\n\n**Verdict:** Microsoft commands higher margins due to its software/cloud-heavy model. Apple benefits from its sticky ecosystem and strong free cash flow generation at $100B+ annually.`,
-];
-
-let responseIdx = 0;
 
 function formatMessage(text) {
   
@@ -84,8 +79,10 @@ export const ChatBot = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isTyping]);
 
-  const sendMessage = (text) => {
-    if (!text.trim()) return;
+  const BASE_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
+
+  const sendMessage = async (text) => {
+    if (!text.trim() || isTyping) return;
 
     const userMessage = {
       id: Date.now(),
@@ -98,21 +95,40 @@ export const ChatBot = () => {
     setInput('');
     setIsTyping(true);
 
-    setTimeout(() => {
+    try {
+      const token = getToken();
+      const res = await fetch(`${BASE_URL}/research/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ message: text }),
+      });
+
+      let data = { content: 'Sorry, something went wrong. Please try again.', citations: [] };
+      if (res.ok) data = await res.json();
+
       const aiMessage = {
         id: Date.now() + 1,
         role: 'assistant',
-        content: MOCK_RESPONSES[responseIdx % MOCK_RESPONSES.length],
-        citations: [
-          { title: 'NVDA Q4 2026 Earnings Release', type: 'SEC Filing' },
-          { title: 'Data Center Market Analysis', type: 'Market Data' },
-        ],
+        content: data.content,
+        citations: data.citations || [],
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
-      responseIdx++;
       setMessages(prev => [...prev, aiMessage]);
+    } catch (err) {
+      const errorMessage = {
+        id: Date.now() + 1,
+        role: 'assistant',
+        content: 'Unable to reach the server. Please check your connection and try again.',
+        citations: [],
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      };
+      setMessages(prev => [...prev, errorMessage]);
+    } finally {
       setIsTyping(false);
-    }, 1600);
+    }
   };
 
   const handleSend = (e) => {

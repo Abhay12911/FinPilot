@@ -48,7 +48,7 @@ async def fetch_news(
         params["topics"] = topics
 
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
+        async with httpx.AsyncClient(timeout=3.0) as client:
             resp = await client.get(AV_BASE, params=params)
             resp.raise_for_status()
             data = resp.json()
@@ -115,7 +115,7 @@ async def fetch_company_overview(api_key: str, symbol: str) -> Optional[dict]:
     }
 
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
+        async with httpx.AsyncClient(timeout=3.0) as client:
             resp = await client.get(AV_BASE, params=params)
             resp.raise_for_status()
             data = resp.json()

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getCompanyDetails, getCompanyNews } from '../services/companies';
-import { getPortfolioPerformance } from '../services/portfolio';
+import { getMarketHistory } from '../services/marketService';
 import { SignalBadge } from '../components/ui/SignalBadge';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -17,29 +17,7 @@ const TABS = ['Overview', 'Financials', 'News', 'AI Analysis'];
 
 const TIME_FILTERS = ['1D', '1W', '1M', '3M', '1Y'];
 
-const generateStockChart = (basePrice, isPositive, points = 30) => {
-  const data = [];
-  let p = basePrice * 0.95;
-  const now = Date.now();
-  for (let i = 0; i < points; i++) {
-    p += (Math.random() - (isPositive ? 0.4 : 0.6)) * basePrice * 0.015;
-    p = Math.max(basePrice * 0.8, Math.min(basePrice * 1.2, p));
-    data.push({
-      date: new Date(now - (points - i) * 86400000).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-      price: Math.round(p * 100) / 100,
-    });
-  }
-  return data;
-};
-
-const generateRevenueData = () => {
-  const quarters = ['Q1\'25', 'Q2\'25', 'Q3\'25', 'Q4\'25', 'Q1\'26', 'Q2\'26'];
-  return quarters.map((q, i) => ({
-    quarter: q,
-    revenue: Math.round((25 + i * 8 + Math.random() * 5) * 10) / 10,
-    earnings: Math.round((8 + i * 3 + Math.random() * 2) * 10) / 10,
-  }));
-};
+// Financial data is now fetched directly from the backend.
 
 const StockTooltip = ({ active, payload, label }) => {
   if (active && payload && payload.length) {
@@ -61,20 +39,28 @@ export const CompanyWorkspace = () => {
   const [company, setCompany] = useState(null);
   const [news, setNews] = useState([]);
   const [chartData, setChartData] = useState([]);
-  const [revenueData] = useState(generateRevenueData());
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
       try {
-        const [comp, n] = await Promise.all([
+        const [comp, n, hist] = await Promise.all([
           getCompanyDetails(ticker),
           getCompanyNews(ticker),
+          getMarketHistory(ticker, '1day', 30).catch(() => null)
         ]);
         setCompany(comp);
         setNews(n);
-        setChartData(generateStockChart(comp.price, comp.change >= 0, 30));
+        if (hist && hist.data && hist.data.length > 0) {
+          const formattedHist = hist.data.map(d => ({
+            date: new Date(d.timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+            price: d.close
+          }));
+          setChartData(formattedHist.reverse());
+        } else {
+          setChartData([]);
+        }
       } catch (error) {
         console.error('Failed to fetch company data', error);
       } finally {
@@ -221,42 +207,48 @@ export const CompanyWorkspace = () => {
                   </div>
                 </div>
 
-                <ResponsiveContainer width="100%" height={220}>
-                  <AreaChart data={chartData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor={chartColor} stopOpacity={0.12} />
-                        <stop offset="95%" stopColor={chartColor} stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#F5F5F5" vertical={false} />
-                    <XAxis
-                      dataKey="date"
-                      tick={{ fontSize: 10, fill: '#8C8C8C', fontFamily: 'monospace' }}
-                      axisLine={false}
-                      tickLine={false}
-                      interval={6}
-                      dy={6}
-                    />
-                    <YAxis
-                      domain={['auto', 'auto']}
-                      tick={{ fontSize: 10, fill: '#8C8C8C', fontFamily: 'monospace' }}
-                      axisLine={false}
-                      tickLine={false}
-                      tickFormatter={(v) => `$${v.toFixed(0)}`}
-                    />
-                    <Tooltip content={<StockTooltip />} />
-                    <Area
-                      type="monotone"
-                      dataKey="price"
-                      stroke={chartColor}
-                      strokeWidth={2}
-                      fill={`url(#${gradientId})`}
-                      dot={false}
-                      activeDot={{ r: 4, fill: chartColor, stroke: '#fff', strokeWidth: 2 }}
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
+                {chartData.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={220}>
+                    <AreaChart data={chartData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor={chartColor} stopOpacity={0.12} />
+                          <stop offset="95%" stopColor={chartColor} stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#F5F5F5" vertical={false} />
+                      <XAxis
+                        dataKey="date"
+                        tick={{ fontSize: 10, fill: '#8C8C8C', fontFamily: 'monospace' }}
+                        axisLine={false}
+                        tickLine={false}
+                        interval={6}
+                        dy={6}
+                      />
+                      <YAxis
+                        domain={['auto', 'auto']}
+                        tick={{ fontSize: 10, fill: '#8C8C8C', fontFamily: 'monospace' }}
+                        axisLine={false}
+                        tickLine={false}
+                        tickFormatter={(v) => `$${v.toFixed(0)}`}
+                      />
+                      <Tooltip content={<StockTooltip />} />
+                      <Area
+                        type="monotone"
+                        dataKey="price"
+                        stroke={chartColor}
+                        strokeWidth={2}
+                        fill={`url(#${gradientId})`}
+                        dot={false}
+                        activeDot={{ r: 4, fill: chartColor, stroke: '#fff', strokeWidth: 2 }}
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="w-full h-[220px] flex items-center justify-center bg-[#FAFAFA] rounded-xl border border-[#F0F0F0]">
+                    <p className="text-[13px] text-[#8C8C8C]">Historical chart data unavailable</p>
+                  </div>
+                )}
               </div>
 
               {}
@@ -270,45 +262,19 @@ export const CompanyWorkspace = () => {
           {}
           {activeTab === 'Financials' && (
             <div className="bg-white rounded-xl border border-[#E5E5E5] p-6 shadow-sm">
-              <h3 className="font-semibold text-[#050505] mb-5">Revenue & Earnings (Quarterly)</h3>
-              <ResponsiveContainer width="100%" height={260}>
-                <BarChart data={revenueData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#F5F5F5" vertical={false} />
-                  <XAxis dataKey="quarter" tick={{ fontSize: 10, fill: '#8C8C8C', fontFamily: 'monospace' }} axisLine={false} tickLine={false} dy={6} />
-                  <YAxis tick={{ fontSize: 10, fill: '#8C8C8C', fontFamily: 'monospace' }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${v}B`} />
-                  <Tooltip formatter={(v, name) => [`$${v}B`, name === 'revenue' ? 'Revenue' : 'Net Income']} />
-                  <Bar dataKey="revenue" fill="#050505" radius={[4, 4, 0, 0]} opacity={0.85} />
-                  <Bar dataKey="earnings" fill="#8C8C8C" radius={[4, 4, 0, 0]} opacity={0.6} />
-                </BarChart>
-              </ResponsiveContainer>
-
-              <div className="flex items-center gap-4 mt-4 pl-1">
-                <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-sm bg-[#050505]" /><span className="text-[11px] text-[#595959]">Revenue</span></div>
-                <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-sm bg-[#8C8C8C] opacity-60" /><span className="text-[11px] text-[#595959]">Net Income</span></div>
-              </div>
-
-              {}
-              <div className="mt-6 overflow-x-auto">
-                <table className="w-full text-[12px]">
-                  <thead>
-                    <tr className="bg-[#FAFAFA] border-b border-[#F0F0F0]">
-                      {['Quarter', 'Revenue', 'Net Income', 'Gross Margin', 'Op. Margin'].map(h => (
-                        <th key={h} className="px-3 py-2.5 text-left font-mono text-[9px] text-[#8C8C8C] uppercase tracking-wider whitespace-nowrap">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {revenueData.map((row, i) => (
-                      <tr key={row.quarter} className="border-b border-[#F5F5F5] last:border-0">
-                        <td className="px-3 py-2.5 font-mono font-bold text-[#050505]">{row.quarter}</td>
-                        <td className="px-3 py-2.5 text-[#050505]">${row.revenue}B</td>
-                        <td className="px-3 py-2.5 text-[#137333]">${row.earnings}B</td>
-                        <td className="px-3 py-2.5 text-[#050505]">{(72 + i * 0.3).toFixed(1)}%</td>
-                        <td className="px-3 py-2.5 text-[#050505]">{(54 + i * 0.5).toFixed(1)}%</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <h3 className="font-semibold text-[#050505] mb-5">Financial Highlights (TTM)</h3>
+              
+              <div className="grid grid-cols-2 gap-4">
+                {Object.entries(company.financials).map(([key, value]) => (
+                  <div key={key} className="p-4 rounded-xl border border-[#F0F0F0] bg-[#FAFAFA]">
+                    <p className="font-mono text-[10px] text-[#8C8C8C] uppercase tracking-wider mb-1">
+                      {key.replace(/([A-Z])/g, ' $1').trim()}
+                    </p>
+                    <p className="text-[16px] font-bold text-[#050505]">
+                      {value}
+                    </p>
+                  </div>
+                ))}
               </div>
             </div>
           )}
@@ -357,18 +323,9 @@ export const CompanyWorkspace = () => {
                 </div>
                 <p className="text-[13.5px] text-[#050505] leading-relaxed mb-4">{company.aiSummary}</p>
 
-                <div className="grid grid-cols-3 gap-3 my-4">
-                  {[
-                    { label: 'Bull Case', value: 'Strong AI demand', color: '#137333', bg: '#E8F5E9' },
-                    { label: 'Bear Case', value: 'Valuation risk', color: '#C5221F', bg: '#FEEBEE' },
-                    { label: 'Catalyst', value: 'Blackwell launch', color: '#F57C00', bg: '#FFF3E0' },
-                  ].map((c) => (
-                    <div key={c.label} className="rounded-lg p-3 border" style={{ backgroundColor: c.bg, borderColor: c.bg }}>
-                      <p className="font-mono text-[9px] uppercase tracking-wider mb-1" style={{ color: c.color }}>{c.label}</p>
-                      <p className="text-[12px] font-semibold text-[#050505]">{c.value}</p>
-                    </div>
-                  ))}
-                </div>
+                <p className="text-[12px] text-[#8C8C8C] italic mb-4">
+                  For a detailed bull/bear analysis, run a Deep Research report or ask FinPilot AI directly in the chat.
+                </p>
 
                 <div className="flex gap-2 mt-4 pt-4 border-t border-[#F0F0F0]">
                   <button

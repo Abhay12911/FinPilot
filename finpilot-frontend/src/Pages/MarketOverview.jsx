@@ -14,6 +14,8 @@ import {
 } from '../services/marketService';
 import { SkeletonBlock, SkeletonChart, SkeletonTable } from '../components/ui/Skeleton';
 
+import { getCachedData, setCachedData } from '../utils/cache';
+
 const TIME_FILTERS = ['1D', '1W', '1M', '3M', '1Y'];
 
 const SYMBOL_KEY_MAP = {
@@ -53,33 +55,53 @@ const CustomTooltip = ({ active, payload, label }) => {
 export const MarketOverview = () => {
   const navigate = useNavigate();
 
-  const [loadingStatus, setLoadingStatus] = useState(true);
-  const [loadingIndices, setLoadingIndices] = useState(true);
-  const [loadingMovers, setLoadingMovers] = useState(true);
-  const [loadingSectors, setLoadingSectors] = useState(true);
-  const [loadingHistory, setLoadingHistory] = useState(true);
-  const [loadingForex, setLoadingForex] = useState(true);
-  const [loadingCommodities, setLoadingCommodities] = useState(true);
-  const [loadingSignals, setLoadingSignals] = useState(true);
+  const [status, setStatus] = useState(() => getCachedData('market_status', null));
+  const [loadingStatus, setLoadingStatus] = useState(() => !getCachedData('market_status', null));
 
-  const [errors, setErrors] = useState({});
+  const [indices, setIndices] = useState(() => getCachedData('market_indices', { india: [], usa: [], global_markets: [] }));
+  const [loadingIndices, setLoadingIndices] = useState(() => {
+    const cached = getCachedData('market_indices', null);
+    return !(cached && (cached.india?.length || cached.usa?.length));
+  });
 
-  const [status, setStatus] = useState(null);
-  const [indices, setIndices] = useState({ india: [], usa: [], global_markets: [] });
-  const [moversMarket, setMoversMarket] = useState('usa'); 
-  const [movers, setMovers] = useState({ gainers: [], losers: [], active: [] });
-  
-  const [sectorsMarket, setSectorsMarket] = useState('usa'); 
-  const [sectors, setSectors] = useState([]);
-  
-  const [forex, setForex] = useState([]);
-  const [commodities, setCommodities] = useState([]);
-  const [signals, setSignals] = useState([]);
+  const [moversMarket, setMoversMarket] = useState('usa');
+  const [movers, setMovers] = useState(() => getCachedData('market_movers_usa', { gainers: [], losers: [], active: [] }));
+  const [loadingMovers, setLoadingMovers] = useState(() => !getCachedData('market_movers_usa', null));
+
+  const [sectorsMarket, setSectorsMarket] = useState('usa');
+  const [sectors, setSectors] = useState(() => getCachedData('market_sectors_usa', []));
+  const [loadingSectors, setLoadingSectors] = useState(() => {
+    const c = getCachedData('market_sectors_usa', []);
+    return !c || c.length === 0;
+  });
 
   const [chartIndex, setChartIndex] = useState('S&P 500');
   const [chartTimeframe, setChartTimeframe] = useState('1M');
-  const [historyData, setHistoryData] = useState([]);
-  const [chartMarket, setChartMarket] = useState('USA'); 
+  const [historyData, setHistoryData] = useState(() => getCachedData('market_history_S&P 500_1M', []));
+  const [loadingHistory, setLoadingHistory] = useState(() => {
+    const c = getCachedData('market_history_S&P 500_1M', []);
+    return !c || c.length === 0;
+  });
+
+  const [forex, setForex] = useState(() => getCachedData('market_forex', []));
+  const [loadingForex, setLoadingForex] = useState(() => {
+    const c = getCachedData('market_forex', []);
+    return !c || c.length === 0;
+  });
+
+  const [commodities, setCommodities] = useState(() => getCachedData('market_commodities', []));
+  const [loadingCommodities, setLoadingCommodities] = useState(() => {
+    const c = getCachedData('market_commodities', []);
+    return !c || c.length === 0;
+  });
+
+  const [signals, setSignals] = useState(() => getCachedData('market_signals', []));
+  const [loadingSignals, setLoadingSignals] = useState(() => {
+    const c = getCachedData('market_signals', []);
+    return !c || c.length === 0;
+  });
+
+  const [errors, setErrors] = useState({});
 
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState(null);
@@ -91,9 +113,13 @@ export const MarketOverview = () => {
 
   const fetchStatusData = useCallback(async (force = false) => {
     try {
-      setLoadingStatus(true);
+      setStatus(prev => {
+        if (!prev) setLoadingStatus(true);
+        return prev;
+      });
       const data = await getMarketStatus(force);
       setStatus(data);
+      setCachedData('market_status', data);
       setErrors(prev => ({ ...prev, status: null }));
     } catch (e) {
       setErrors(prev => ({ ...prev, status: e.message }));
@@ -104,9 +130,13 @@ export const MarketOverview = () => {
 
   const fetchIndicesData = useCallback(async (force = false) => {
     try {
-      setLoadingIndices(true);
+      setIndices(prev => {
+        if (!prev?.india?.length && !prev?.usa?.length) setLoadingIndices(true);
+        return prev;
+      });
       const data = await getMarketIndices(force);
       setIndices(data);
+      setCachedData('market_indices', data);
       setErrors(prev => ({ ...prev, indices: null }));
     } catch (e) {
       setErrors(prev => ({ ...prev, indices: e.message }));
@@ -117,9 +147,16 @@ export const MarketOverview = () => {
 
   const fetchMoversData = useCallback(async (market, force = false) => {
     try {
-      setLoadingMovers(true);
+      const cacheKey = `market_movers_${market}`;
+      const cached = getCachedData(cacheKey, null);
+      if (cached && (cached.gainers?.length || cached.losers?.length)) {
+        setMovers(cached);
+      } else {
+        setLoadingMovers(true);
+      }
       const data = await getMarketMovers(market, force);
       setMovers(data);
+      setCachedData(cacheKey, data);
       setErrors(prev => ({ ...prev, movers: null }));
     } catch (e) {
       setErrors(prev => ({ ...prev, movers: e.message }));
@@ -130,9 +167,16 @@ export const MarketOverview = () => {
 
   const fetchSectorsData = useCallback(async (market, force = false) => {
     try {
-      setLoadingSectors(true);
+      const cacheKey = `market_sectors_${market}`;
+      const cached = getCachedData(cacheKey, null);
+      if (cached && cached.length > 0) {
+        setSectors(cached);
+      } else {
+        setLoadingSectors(true);
+      }
       const data = await getSectorPerformance(market, force);
       setSectors(data);
+      setCachedData(cacheKey, data);
       setErrors(prev => ({ ...prev, sectors: null }));
     } catch (e) {
       setErrors(prev => ({ ...prev, sectors: e.message }));
@@ -143,7 +187,14 @@ export const MarketOverview = () => {
 
   const fetchHistoryData = useCallback(async (symbolName, timeframe) => {
     try {
-      setLoadingHistory(true);
+      const cacheKey = `market_history_${symbolName}_${timeframe}`;
+      const cached = getCachedData(cacheKey, null);
+      if (cached && cached.length > 0) {
+        setHistoryData(cached);
+        setLoadingHistory(false);
+      } else {
+        setLoadingHistory(true);
+      }
       const symbol = SYMBOL_KEY_MAP[symbolName] || 'SPX';
 
       let outputsize = 30;
@@ -155,7 +206,11 @@ export const MarketOverview = () => {
       
       const interval = timeframe === '1D' ? '1h' : '1day';
       const data = await getMarketHistory(symbol, interval, outputsize);
-      setHistoryData(data);
+      const points = Array.isArray(data) ? data : (data?.data || []);
+      if (points.length > 0) {
+        setHistoryData(points);
+        setCachedData(cacheKey, points);
+      }
       setErrors(prev => ({ ...prev, history: null }));
     } catch (e) {
       setErrors(prev => ({ ...prev, history: e.message }));
@@ -166,9 +221,13 @@ export const MarketOverview = () => {
 
   const fetchForexData = useCallback(async () => {
     try {
-      setLoadingForex(true);
+      setForex(prev => {
+        if (!prev?.length) setLoadingForex(true);
+        return prev;
+      });
       const data = await getForex();
       setForex(data);
+      setCachedData('market_forex', data);
       setErrors(prev => ({ ...prev, forex: null }));
     } catch (e) {
       setErrors(prev => ({ ...prev, forex: e.message }));
@@ -179,9 +238,13 @@ export const MarketOverview = () => {
 
   const fetchCommoditiesData = useCallback(async () => {
     try {
-      setLoadingCommodities(true);
+      setCommodities(prev => {
+        if (!prev?.length) setLoadingCommodities(true);
+        return prev;
+      });
       const data = await getCommodities();
       setCommodities(data);
+      setCachedData('market_commodities', data);
       setErrors(prev => ({ ...prev, commodities: null }));
     } catch (e) {
       setErrors(prev => ({ ...prev, commodities: e.message }));
@@ -192,9 +255,13 @@ export const MarketOverview = () => {
 
   const fetchSignalsData = useCallback(async () => {
     try {
-      setLoadingSignals(true);
+      setSignals(prev => {
+        if (!prev?.length) setLoadingSignals(true);
+        return prev;
+      });
       const data = await getMarketSignals();
       setSignals(data);
+      setCachedData('market_signals', data);
       setErrors(prev => ({ ...prev, signals: null }));
     } catch (e) {
       setErrors(prev => ({ ...prev, signals: e.message }));
@@ -253,7 +320,7 @@ export const MarketOverview = () => {
     return () => document.removeEventListener('mousedown', handleOutsideClick);
   }, []);
 
-  const handleRefresh = useCallback(async (force = true) => {
+  const handleRefresh = useCallback(async (force = false) => {
     if (refreshing) return;
     setRefreshing(true);
     await Promise.allSettled([
@@ -271,9 +338,10 @@ export const MarketOverview = () => {
   }, [chartIndex, chartTimeframe, fetchCommoditiesData, fetchForexData, fetchHistoryData, fetchIndicesData, fetchMoversData, fetchSectorsData, fetchSignalsData, fetchStatusData, moversMarket, refreshing, sectorsMarket]);
 
   useEffect(() => {
+    // Background auto-refresh every 5 minutes (300,000 ms) using cached backend data
     const checkAndPoll = setInterval(() => {
-      if (document.visibilityState === 'visible') handleRefresh(true);
-    }, 60000);
+      if (document.visibilityState === 'visible') handleRefresh(false);
+    }, 300000);
 
     return () => clearInterval(checkAndPoll);
   }, [handleRefresh]);
@@ -358,7 +426,7 @@ export const MarketOverview = () => {
 
           {}
           <button
-            onClick={handleRefresh}
+            onClick={() => handleRefresh(true)}
             disabled={refreshing}
             className="flex items-center gap-2 px-3 py-2 text-[12px] text-[#595959] border border-[#E5E5E5] bg-white rounded-lg hover:bg-[#F5F5F5] hover:border-[#C8C8C8] transition-colors focus-ring"
           >

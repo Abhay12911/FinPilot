@@ -1,7 +1,7 @@
 import logging
 import json
 import httpx
-from datetime import datetime, timedelta, time, timezone
+from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 from sqlalchemy.orm import Session
 from app.database import settings
@@ -42,32 +42,45 @@ FALLBACK_INDEX_QUOTES = {
     "GAS": {"name": "Natural Gas", "price": 2.15, "change": -0.08, "change_pct": -0.0358, "currency": "USD", "market": "Global"}
 }
 
+# Sector performance proxies — real, freely-available Yahoo Finance tickers.
+# US: SPDR Select Sector ETFs. India: NSE sectoral indices.
+SECTOR_SYMBOLS = {
+    "usa": {
+        "Technology": "XLK",
+        "Financials": "XLF",
+        "Healthcare": "XLV",
+        "Energy": "XLE",
+        "Consumer Cyclical": "XLY",
+        "Industrials": "XLI",
+        "Communication Services": "XLC",
+        "Utilities": "XLU",
+        "Materials": "XLB",
+        "Real Estate": "XLRE",
+    },
+    "india": {
+        "IT & Software": "^CNXIT",
+        "Banking & Finance": "^NSEBANK",
+        "Automobile": "^CNXAUTO",
+        "Pharmaceuticals": "^CNXPHARMA",
+        "FMCG": "^CNXFMCG",
+        "Metal & Mining": "^CNXMETAL",
+        "Energy & Utilities": "^CNXENERGY",
+    },
+}
+
+
 def _get_api_key() -> Optional[str]:
-    """Return a configured Twelve Data key, or ``None`` when unavailable."""
-    key = (settings.TWELVE_DATA_KEY or "").strip()
-    return key if key and key.lower() != "demo" else None
+    """Return the configured Twelve Data key, or None if unset/demo.
 
-
-def _market_status_from_hours(offset: timedelta, opens_at: time, closes_at: time) -> str:
-    """Return a regular-session state from a UTC offset without OS timezone data."""
-    now = datetime.now(timezone.utc) + offset
-    if now.weekday() >= 5:
-        return "closed"
-    current_time = now.time()
-    return "open" if opens_at <= current_time < closes_at else "closed"
-
-
-def _is_us_daylight_saving(now_utc: datetime) -> bool:
-    """Determine U.S. Eastern DST using the U.S. statutory transition dates."""
-    year = now_utc.year
-    march_first = datetime(year, 3, 1, tzinfo=timezone.utc)
-    november_first = datetime(year, 11, 1, tzinfo=timezone.utc)
-    dst_start_day = 1 + ((6 - march_first.weekday()) % 7) + 7  # second Sunday in March
-    dst_end_day = 1 + ((6 - november_first.weekday()) % 7)  # first Sunday in November
-    # Transitions happen at 02:00 local: 07:00 UTC in March and 06:00 UTC in November.
-    dst_start = datetime(year, 3, dst_start_day, 7, tzinfo=timezone.utc)
-    dst_end = datetime(year, 11, dst_end_day, 6, tzinfo=timezone.utc)
-    return dst_start <= now_utc < dst_end
+    Returning None (rather than the literal string "demo") lets every
+    call site use a simple `if api_key:` truthiness check instead of
+    each having to remember to also compare against "demo" — previously
+    only get_sectors() did that check correctly, so get_quote/get_movers/
+    get_indices were firing real HTTP requests at Twelve Data with a
+    non-functional demo key on every call before falling back anyway.
+    """
+    key = settings.TWELVE_DATA_KEY
+    return key if key and key != "demo" else None
 
 # --- General Key-Value Cache Helpers ---
 def _get_cache_value(db: Session, key: str, ttl_minutes: int) -> Optional[Any]:
@@ -213,14 +226,16 @@ async def get_market_status(db: Session, force: bool = False) -> Dict[str, Any]:
         return cached
         
     api_key = _get_api_key()
-    states = await twelve_data.fetch_market_status(api_key) if api_key else []
+    states = []
+    if api_key:
+        try:
+            states = await twelve_data.fetch_market_status(api_key)
+        except Exception as e:
+            logger.error("Failed to fetch market status from API: %s", e)
     
-    # Fall back to each exchange's local regular trading session when an API
-    # status is unavailable (for example, when no Twelve Data key is set).
-    now_utc = datetime.now(timezone.utc)
-    india_status = _market_status_from_hours(timedelta(hours=5, minutes=30), time(9, 15), time(15, 30))
-    usa_offset = timedelta(hours=-4 if _is_us_daylight_saving(now_utc) else -5)
-    usa_status = _market_status_from_hours(usa_offset, time(9, 30), time(16, 0))
+    # Defaults
+    india_status = "closed"
+    usa_status = "closed"
     
     for state in states:
         code = state.get("code")
@@ -238,6 +253,26 @@ async def get_market_status(db: Session, force: bool = False) -> Dict[str, Any]:
             india_status = normalized
         elif code in ["XNYS", "XNAS"]:
             usa_status = normalized
+            
+    # Fallback if API didn't return 'open' (likely due to demo key limitations)
+    now = datetime.utcnow()
+    weekday = now.weekday() # 0 is Monday, 4 is Friday
+    
+    if india_status == "closed" and not states:
+        # India (NSE): 03:45 to 10:00 UTC (9:15 AM to 3:30 PM IST)
+        if weekday < 5:
+            hour = now.hour
+            minute = now.minute
+            if (hour == 3 and minute >= 45) or (hour > 3 and hour < 10):
+                india_status = "open"
+
+    if usa_status == "closed" and not states:
+        # US (NYSE): 13:30 to 20:00 UTC (summer) / 14:30 to 21:00 UTC (winter)
+        # Using a loose approximation for US market hours
+        if weekday < 5:
+            hour = now.hour
+            if hour >= 14 and hour < 21:
+                usa_status = "open"
             
     response = {
         "india": {
@@ -465,43 +500,41 @@ async def get_movers(db: Session, market: str, force: bool = False) -> Dict[str,
     return response
 
 async def get_sectors(db: Session, market: str, force: bool = False) -> List[Dict[str, Any]]:
-    """Return sector performances for the market (US / India)."""
-    api_key = _get_api_key()
+    """Return sector performances for the market (US / India).
+
+    NOTE: This previously called f"{TD_BASE_URL}/sectors", which is not a
+    real Twelve Data endpoint (Twelve Data has no sector-performance
+    endpoint on any tier) — every call silently 404'd/errored and this
+    function always fell through to the static mock data below, so
+    "sector performance" was never actually live. It now derives real,
+    free, no-key-required sector performance from Yahoo Finance quotes
+    of representative sector ETFs / indices (1-day change_percent),
+    which is the same approach get_indices already uses successfully.
+    """
     cache_key = f"sectors_{market.lower()}"
     cached = None if force else _get_cache_value(db, cache_key, CACHE_TTL_MINUTES)
     if cached:
         return cached
-        
-    response = []
-    
-    if api_key:
-        # Call Twelve Data SECTOR endpoint
-        url = f"{twelve_data.TD_BASE_URL}/sectors"
-        params = {"apikey": api_key}
-        
-        try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.get(url, params=params)
-                resp.raise_for_status()
-                data = resp.json()
-                if "status" not in data or data["status"] != "error":
-                    sectors_raw = data.get("sectors", [])
-                    for item in sectors_raw:
-                        try:
-                            change_percent = float(str(item.get("change_percent", "0")).rstrip("%"))
-                        except (TypeError, ValueError):
-                            logger.warning("Skipping sector with invalid change_percent: %s", item)
-                            continue
-                        response.append({
-                            "sector": item.get("name"),
-                            "change_percent": change_percent,
-                            "market": market,
-                            "timestamp": datetime.utcnow()
-                        })
-        except Exception:
-            pass
 
-    # High-quality fallback data if API failed, was demo or returned empty list
+    response = []
+
+    sector_symbols = SECTOR_SYMBOLS.get(market.lower(), {})
+    if sector_symbols:
+        try:
+            quotes = await yahoo_finance.fetch_batch_quotes(list(sector_symbols.values()))
+            for sector_name, yf_symbol in sector_symbols.items():
+                q = quotes.get(yf_symbol)
+                if q and q.get("percent_change") is not None:
+                    response.append({
+                        "sector": sector_name,
+                        "change_percent": round(q["percent_change"], 2),
+                        "market": market,
+                        "timestamp": datetime.utcnow()
+                    })
+        except Exception as exc:
+            logger.error("Yahoo Finance sector fetch failed for %s: %s", market, exc)
+
+    # High-quality fallback data if live fetch failed or returned nothing
     if not response:
         ts = datetime.utcnow().isoformat()
         if market.lower() == "india":
@@ -554,7 +587,7 @@ async def get_history(
         try:
             # Twelve Data returns timestamps as format "YYYY-MM-DD HH:MM:SS" or "YYYY-MM-DD"
             ts_str = pt.get("datetime")
-            if not isinstance(ts_str, str) or not ts_str:
+            if not ts_str:
                 continue
             if " " not in ts_str:
                 ts_str += " 16:00:00"  # standard close time for index close
@@ -626,7 +659,12 @@ async def get_history(
 async def search_market(db: Session, query: str) -> Dict[str, List[Dict[str, Any]]]:
     """Search Twelve Data symbols and categorize results."""
     api_key = _get_api_key()
-    results = await twelve_data.fetch_search(api_key, query) if api_key else []
+    if not api_key:
+        # Twelve Data's symbol_search requires a key; without one, return
+        # an empty (not broken) result rather than firing a request with
+        # apikey=None.
+        return {"equities": [], "indices": [], "forex": [], "commodities": []}
+    results = await twelve_data.fetch_search(api_key, query)
     
     equities = []
     indices = []
@@ -740,11 +778,12 @@ async def get_market_signals(db: Session) -> List[Dict[str, Any]]:
         pct = item["change_percent"]  # Already in % units e.g. 0.74 means +0.74%
         sym = item["symbol"]
         name = item["name"]
-        
+
         # Calculate a deterministic signal based on the quote changes
         if pct > 1.5:
             signals.append({
                 "asset": name,
+                "symbol": sym,
                 "signal": "Strong Momentum",
                 "strength": int(min(70 + (pct * 8), 98)),
                 "reason": f"{name} is surging {pct:+.2f}% today, trading well above its opening levels with strong volume pressure.",
@@ -753,6 +792,7 @@ async def get_market_signals(db: Session) -> List[Dict[str, Any]]:
         elif pct > 0.3:
             signals.append({
                 "asset": name,
+                "symbol": sym,
                 "signal": "Bullish Trend",
                 "strength": int(min(55 + (pct * 12), 75)),
                 "reason": f"{name} shows healthy upward momentum at {pct:+.2f}%, holding above yesterday's close.",
@@ -761,6 +801,7 @@ async def get_market_signals(db: Session) -> List[Dict[str, Any]]:
         elif pct < -1.5:
             signals.append({
                 "asset": name,
+                "symbol": sym,
                 "signal": "Bearish Pressure",
                 "strength": int(min(70 + (abs(pct) * 8), 98)),
                 "reason": f"{name} is under selling pressure at {pct:+.2f}%, with rising intraday volatility.",
@@ -769,6 +810,7 @@ async def get_market_signals(db: Session) -> List[Dict[str, Any]]:
         elif pct < -0.3:
             signals.append({
                 "asset": name,
+                "symbol": sym,
                 "signal": "Soft Volatility",
                 "strength": int(min(55 + (abs(pct) * 12), 75)),
                 "reason": f"{name} is sliding {pct:+.2f}% lower, undergoing minor consolidative profit-taking.",
@@ -777,6 +819,7 @@ async def get_market_signals(db: Session) -> List[Dict[str, Any]]:
         else:
             signals.append({
                 "asset": name,
+                "symbol": sym,
                 "signal": "Neutral Consolidation",
                 "strength": 50,
                 "reason": f"{name} is consolidating near {val:,.2f} (change: {pct:+.2f}%) with contained trading bandwidth.",

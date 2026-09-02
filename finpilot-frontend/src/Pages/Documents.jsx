@@ -4,6 +4,10 @@ import { getDocuments, uploadDocument, deleteDocument, updateDocumentStatus } fr
 import { SkeletonTable } from '../components/ui/Skeleton';
 import { EmptyState } from '../components/ui/EmptyState';
 
+// Backend Document.status values are "Indexed" / "Processing" / "Uploading"
+// (see app/models/research.py) — keyed here by lowercase for a
+// case-insensitive lookup below, since that's cheaper than trusting every
+// caller to send exact casing.
 const STATUS_CONFIG = {
   indexed: { label: 'Indexed', icon: CheckCircle, color: 'text-[#137333]', bg: 'bg-[#E6F4EA]' },
   processing: { label: 'Processing', icon: Loader2, color: 'text-[#595959]', bg: 'bg-[#F5F5F5]', spin: true },
@@ -37,7 +41,7 @@ export const Documents = () => {
       await loadData();
 
       setTimeout(async () => {
-        await updateDocumentStatus(newDoc.id, 'indexed');
+        await updateDocumentStatus(newDoc.id, 'Indexed');
         await loadData();
       }, 2500);
     } catch (e) {
@@ -72,9 +76,11 @@ export const Documents = () => {
     }
   };
 
+  // The backend Document model only stores { id, name, size, status,
+  // uploadedAt } — there's no company/type/pages field, so searching
+  // (and rendering, below) only uses what the API actually returns.
   const filtered = docs.filter(d =>
-    d.name.toLowerCase().includes(search.toLowerCase()) ||
-    d.company.toLowerCase().includes(search.toLowerCase())
+    d.name.toLowerCase().includes(search.toLowerCase())
   );
 
   if (loading && docs.length === 0) {
@@ -138,29 +144,25 @@ export const Documents = () => {
         <table className="w-full">
           <thead>
             <tr className="bg-[#FAFAFA] border-b border-[#F0F0F0]">
-              {['Document', 'Company', 'Type', 'Date', 'Pages', 'Size', 'Status', ''].map(h => (
+              {['Document', 'Uploaded', 'Size', 'Status', ''].map(h => (
                 <th key={h} className="px-4 py-3 text-left font-mono text-[10px] text-[#8C8C8C] uppercase tracking-wider whitespace-nowrap">{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {filtered.map(doc => {
-              const status = STATUS_CONFIG[doc.status] || STATUS_CONFIG.indexed;
+              const status = STATUS_CONFIG[(doc.status || '').toLowerCase()] || STATUS_CONFIG.indexed;
               const StatusIcon = status.icon;
+              const isIndexed = (doc.status || '').toLowerCase() === 'indexed';
               return (
                 <tr key={doc.id} className="border-b border-[#F0F0F0] last:border-0 hover:bg-[#FAFAFA] transition-colors">
                   <td className="px-4 py-4">
                     <div className="flex items-center gap-2">
                       <FileText size={16} className="text-[#8C8C8C] shrink-0" />
-                      <span className="text-[13px] font-medium text-[#050505] truncate max-w-[180px]">{doc.name}</span>
+                      <span className="text-[13px] font-medium text-[#050505] truncate max-w-[260px]">{doc.name}</span>
                     </div>
                   </td>
-                  <td className="px-4 py-4 text-[13px] text-[#595959]">{doc.company}</td>
-                  <td className="px-4 py-4">
-                    <span className="font-mono text-[10px] bg-[#F5F5F5] border border-[#E5E5E5] text-[#525252] px-2 py-0.5 rounded">{doc.type}</span>
-                  </td>
-                  <td className="px-4 py-4 text-[13px] text-[#8C8C8C] font-mono">{doc.date}</td>
-                  <td className="px-4 py-4 text-[13px] text-[#8C8C8C]">{doc.pages}</td>
+                  <td className="px-4 py-4 text-[13px] text-[#8C8C8C] font-mono">{doc.uploadedAt}</td>
                   <td className="px-4 py-4 text-[13px] text-[#8C8C8C]">{doc.size}</td>
                   <td className="px-4 py-4">
                     <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full w-fit ${status.bg}`}>
@@ -170,7 +172,7 @@ export const Documents = () => {
                   </td>
                   <td className="px-4 py-4">
                     <div className="flex items-center gap-1">
-                      {doc.status === 'indexed' && (
+                      {isIndexed && (
                         <button className="flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-md text-[#050505] hover:bg-[#F5F5F5] whitespace-nowrap cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#050505]">
                           <MessageSquare size={12} /> Ask AI
                         </button>
@@ -189,7 +191,7 @@ export const Documents = () => {
             })}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={8}>
+                <td colSpan={5}>
                   <EmptyState
                     icon={FileText}
                     title={search ? 'No documents match your search' : 'No documents yet'}

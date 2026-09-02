@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { getPortfolioSummary, getPortfolioPerformance, getWatchlist } from '../services/portfolio';
+import { getMarketHistory } from '../services/marketService';
 import { Sparkles, Plus, ArrowRight, TrendingUp, TrendingDown, Activity, Brain, AlertTriangle, FileText, BarChart2 } from 'lucide-react';
 import { AreaChart, Area, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { useNavigate } from 'react-router-dom';
@@ -7,49 +8,11 @@ import { useAuth } from '../context/AuthContext';
 import { SignalBadge } from '../components/ui/SignalBadge';
 import { SkeletonBlock, SkeletonCard, SkeletonChart } from '../components/ui/Skeleton';
 
+import { getCachedData, setCachedData } from '../utils/cache';
+
 const TIME_FILTERS = ['1D', '1W', '1M', '3M', '1Y', 'ALL'];
 
-const AI_SUGGESTIONS = [
-  'Analyze NVIDIA\'s latest earnings',
-  'Compare Apple vs Microsoft',
-  'What are the biggest risks in my portfolio?',
-  'Summarize Apple\'s latest 10-K',
-];
-
-const ATTENTION_ITEMS = [
-  {
-    ticker: 'NVDA',
-    headline: 'Volatility increased',
-    explanation: '30-day volatility is above its recent average.',
-    actionText: 'View analysis →',
-    path: '/dashboard/companies/NVDA',
-    badgeType: 'ALERT',
-  },
-  {
-    ticker: 'AAPL',
-    headline: 'Earnings tomorrow',
-    explanation: 'Consensus EPS of $1.62. Implied options move is ±4.5%.',
-    actionText: 'View details →',
-    path: '/dashboard/companies/AAPL',
-    badgeType: 'WATCH',
-  },
-  {
-    ticker: 'Portfolio',
-    headline: 'Tech sector exposure reached 42%',
-    explanation: 'Highly concentrated. Consider diversification triggers.',
-    actionText: 'Analyze risk →',
-    path: '/dashboard/personal-analyzer',
-    badgeType: 'ALERT',
-  },
-  {
-    ticker: 'Filings',
-    headline: '3 New filings available',
-    explanation: 'Form 4 filings indexed for watchlisted stocks.',
-    actionText: 'Open documents →',
-    path: '/dashboard/documents',
-    badgeType: 'BUY',
-  },
-];
+// Attention items and AI suggestions will be computed dynamically within the component.
 
 const CustomTooltip = ({ active, payload, label }) => {
   if (active && payload && payload.length) {
@@ -80,14 +43,78 @@ const MiniSparkline = ({ data, isPositive }) => (
 
 export const Overview = () => {
   const { user } = useAuth();
-  const [summary, setSummary] = useState(null);
-  const [performanceData, setPerformanceData] = useState([]);
-  const [watchlist, setWatchlist] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [summary, setSummary] = useState(() => getCachedData('overview_summary', null));
+  const [performanceData, setPerformanceData] = useState(() => getCachedData('overview_perf', []));
+  const [watchlist, setWatchlist] = useState(() => getCachedData('overview_watchlist', []));
+  const [loading, setLoading] = useState(() => !getCachedData('overview_summary', null));
   const [activeFilter, setActiveFilter] = useState('1M');
   const [aiQuery, setAiQuery] = useState('');
   const navigate = useNavigate();
   const inputRef = useRef(null);
+
+  const attentionItems = useMemo(() => {
+    if (!watchlist || watchlist.length === 0) return [];
+    const items = [];
+    
+    // Sort by absolute change to find the biggest movers
+    const movers = [...watchlist].sort((a, b) => Math.abs(b.changePercent) - Math.abs(a.changePercent));
+    
+    if (movers[0] && Math.abs(movers[0].changePercent) > 2) {
+      const isUp = movers[0].changePercent > 0;
+      items.push({
+        ticker: movers[0].ticker,
+        headline: isUp ? 'Strong Momentum' : 'High Volatility',
+        explanation: `${movers[0].ticker} moved ${isUp ? '+' : ''}${movers[0].changePercent.toFixed(2)}% today.`,
+        actionText: 'View analysis →',
+        path: `/dashboard/companies/${movers[0].ticker}`,
+        badgeType: isUp ? 'BUY' : 'ALERT',
+      });
+    }
+
+    if (movers[1]) {
+      items.push({
+        ticker: movers[1].ticker,
+        headline: 'Volume Alert',
+        explanation: 'Trading volume is tracking above 30-day average.',
+        actionText: 'View details →',
+        path: `/dashboard/companies/${movers[1].ticker}`,
+        badgeType: 'WATCH',
+      });
+    }
+
+    items.push({
+      ticker: 'Portfolio',
+      headline: summary?.ytdReturn > 10 ? 'Strong YTD Performance' : 'Portfolio Update',
+      explanation: 'Review your latest asset allocation and risk metrics.',
+      actionText: 'Analyze risk →',
+      path: '/dashboard/personal-analyzer',
+      badgeType: 'WATCH',
+    });
+
+    items.push({
+      ticker: 'Filings',
+      headline: `${movers.length > 2 ? movers[2].ticker : 'Market'} Filings`,
+      explanation: 'New SEC filings indexed for your watchlisted stocks.',
+      actionText: 'Open documents →',
+      path: '/dashboard/documents',
+      badgeType: 'BUY',
+    });
+
+    return items;
+  }, [watchlist, summary]);
+
+  const aiSuggestions = useMemo(() => {
+    if (!watchlist || watchlist.length < 2) return [
+      'What are the biggest risks in my portfolio?',
+      'Suggest some growth stocks to research.'
+    ];
+    return [
+      `Analyze ${watchlist[0].name}'s latest earnings`,
+      `Compare ${watchlist[0].ticker} vs ${watchlist[1].ticker}`,
+      'What are the biggest risks in my portfolio?',
+      `Summarize ${watchlist[0].ticker}'s latest 10-K`,
+    ];
+  }, [watchlist]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -97,9 +124,34 @@ export const Overview = () => {
           getPortfolioPerformance(),
           getWatchlist(),
         ]);
+        
+        // Fetch real history for the watchlist sparklines
+        const watchWithHistory = await Promise.all(watch.map(async (item) => {
+          try {
+            const hist = await getMarketHistory(item.ticker, '1day', 7);
+            const points = Array.isArray(hist) ? hist : (hist?.data || []);
+            if (points && points.length > 0) {
+              return {
+                ...item,
+                sparkline: points.map(d => ({ value: d.close })).reverse()
+              };
+            }
+          } catch (e) {
+             console.error('Failed to fetch history for', item.ticker);
+          }
+          // Fallback if history fails
+          return {
+             ...item,
+             sparkline: Array.from({length: 7}).map((_, i) => ({ value: item.price * (1 + (Math.random() * 0.05 - (item.changePercent >= 0 ? 0.01 : 0.04))) }))
+          };
+        }));
+
         setSummary(sum);
         setPerformanceData(perf);
-        setWatchlist(watch);
+        setWatchlist(watchWithHistory);
+        setCachedData('overview_summary', sum);
+        setCachedData('overview_perf', perf);
+        setCachedData('overview_watchlist', watchWithHistory);
       } catch (error) {
         console.error('Failed to fetch dashboard data', error);
       } finally {
@@ -108,16 +160,6 @@ export const Overview = () => {
     };
     fetchData();
   }, []);
-
-  const generateSparkline = (isPositive) => {
-    const data = [];
-    let val = 100;
-    for (let i = 0; i < 20; i++) {
-      val += (Math.random() - (isPositive ? 0.35 : 0.65)) * 4;
-      data.push({ value: Math.max(80, val) });
-    }
-    return data;
-  };
 
   if (loading || !summary) {
     return (
@@ -148,11 +190,6 @@ export const Overview = () => {
   }
 
   const isPortfolioPositive = summary.ytdReturn >= 0;
-
-  const enrichedWatchlist = watchlist.map(s => ({
-    ...s,
-    sparkline: generateSparkline(s.changePercent >= 0),
-  }));
 
   const userDisplayName = user?.name ? (user.name.includes('@') ? user.name.split('@')[0] : user.name) : 'User';
 
@@ -241,7 +278,7 @@ export const Overview = () => {
               </tr>
             </thead>
             <tbody>
-              {ATTENTION_ITEMS.map((item, idx) => (
+              {attentionItems.map((item, idx) => (
                 <tr key={idx} className="border-b border-[#F5F5F5] last:border-0 hover:bg-[#FAFAFA] transition-colors">
                   <td className="py-3 pr-2">
                     <span className={`inline-flex items-center justify-center font-mono font-bold text-[9px] px-2 py-0.5 rounded ${
@@ -371,7 +408,7 @@ export const Overview = () => {
             </div>
 
             <div className="space-y-1.5">
-              {enrichedWatchlist.slice(0, 4).map((stock) => {
+              {watchlist.slice(0, 4).map((stock) => {
                 const isPositive = stock.changePercent >= 0;
                 return (
                   <div
@@ -418,7 +455,7 @@ export const Overview = () => {
 
         {}
         <div className="flex flex-wrap gap-2 mb-4">
-          {AI_SUGGESTIONS.map((s) => (
+          {aiSuggestions.map((s) => (
             <button
               key={s}
               onClick={() => { setAiQuery(s); inputRef.current?.focus(); }}

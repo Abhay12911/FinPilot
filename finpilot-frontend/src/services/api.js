@@ -1,36 +1,46 @@
+export const BASE_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
 
+const TOKEN_KEY = 'finpilot_token';
 
-const BASE_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
+export function getToken() {
+  return localStorage.getItem(TOKEN_KEY);
+}
 
-export const getToken = () => {
-  const stored = localStorage.getItem('finpilot_user');
-  if (!stored) return null;
-  try {
-    return JSON.parse(stored).token ?? null;
-  } catch {
-    return null;
+export function setToken(token) {
+  if (token) localStorage.setItem(TOKEN_KEY, token);
+}
+
+export function clearToken() {
+  localStorage.removeItem(TOKEN_KEY);
+}
+
+export async function apiFetch(path, { method = 'GET', body, headers = {}, auth = true, isForm = false } = {}) {
+  const token = auth ? getToken() : null;
+
+  const finalHeaders = { ...headers };
+  if (!isForm && body !== undefined) finalHeaders['Content-Type'] = 'application/json';
+  if (token) finalHeaders['Authorization'] = `Bearer ${token}`;
+
+  const res = await fetch(`${BASE_URL}${path}`, {
+    method,
+    headers: finalHeaders,
+    body: body === undefined ? undefined : (isForm ? body : JSON.stringify(body)),
+  });
+
+  if (res.status === 401) {
+    clearToken();
   }
-};
-
-async function request(path, options = {}, withAuth = false) {
-  const headers = { ...(options.headers || {}) };
-
-  if (withAuth) {
-    const token = getToken();
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-  }
-
-  const res = await fetch(`${BASE_URL}${path}`, { ...options, headers });
 
   if (!res.ok) {
-    let detail = `Request failed: ${res.status}`;
+    let detail = res.statusText;
     try {
-      const json = await res.json();
-      detail = json.detail || detail;
+      const errBody = await res.json();
+      detail = errBody.detail || JSON.stringify(errBody);
     } catch {
-      detail = `Request failed: ${res.status}`;
     }
-    throw new Error(detail);
+    const err = new Error(detail || `Request to ${path} failed with ${res.status}`);
+    err.status = res.status;
+    throw err;
   }
 
   if (res.status === 204) return null;
@@ -38,27 +48,31 @@ async function request(path, options = {}, withAuth = false) {
 }
 
 export async function apiLogin(email, password) {
-  const body = new URLSearchParams();
-  body.append('username', email); 
-  body.append('password', password);
-
-  return request('/auth/token', {
+  const form = new URLSearchParams();
+  form.append('username', email);
+  form.append('password', password);
+  const res = await fetch(`${BASE_URL}/auth/token`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body,
+    body: form.toString(),
   });
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}));
+    throw new Error(errBody.detail || 'Login failed');
+  }
+  const data = await res.json();
+  setToken(data.access_token);
+  return data;
 }
 
 export async function apiRegister(email, password) {
-  return request('/auth/register', {
+  return apiFetch('/auth/register', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
+    body: { email, password },
+    auth: false,
   });
 }
 
 export async function apiGetMe() {
-  return request('/auth/me', {}, true);
+  return apiFetch('/auth/me');
 }
-
-export default { apiLogin, apiRegister, apiGetMe, getToken };

@@ -11,6 +11,7 @@ from app.database import get_db, settings
 from app.models.market import MarketCache, MarketQuote
 from app.services import market_service, news_service
 from app.provider import alpha_vantage
+import yfinance as yf
 
 logger = logging.getLogger(__name__)
 
@@ -140,20 +141,37 @@ COMPANY_DATA = {
     }
 }
 
-def format_market_cap(val_str) -> str:
-    if not val_str:
-        return "N/A"
+def _safe_float(val, default=None) -> Optional[float]:
+    """Alpha Vantage frequently returns the literal string "None" (not
+    JSON null) for fields it doesn't have data for. float("None") raises
+    ValueError, so every numeric field pulled from OVERVIEW needs to go
+    through this instead of a bare float(...) call."""
+    if val is None or val == "None" or val == "":
+        return default
     try:
-        val = float(val_str)
-        if val >= 1e12:
-            return f"${val / 1e12:.2f}T"
-        elif val >= 1e9:
-            return f"${val / 1e9:.2f}B"
-        elif val >= 1e6:
-            return f"${val / 1e6:.2f}M"
-        return f"${val:.2f}"
-    except Exception:
-        return val_str
+        return float(val)
+    except (TypeError, ValueError):
+        return default
+
+
+def _clean_str(val, default="N/A") -> str:
+    """Normalize Alpha Vantage's "None" string sentinel to a real N/A."""
+    if val is None or val == "None" or val == "":
+        return default
+    return str(val)
+
+
+def format_market_cap(val_str) -> str:
+    val = _safe_float(val_str)
+    if val is None:
+        return "N/A"
+    if val >= 1e12:
+        return f"${val / 1e12:.2f}T"
+    elif val >= 1e9:
+        return f"${val / 1e9:.2f}B"
+    elif val >= 1e6:
+        return f"${val / 1e6:.2f}M"
+    return f"${val:.2f}"
 
 @router.get("/{ticker}")
 async def get_company(
@@ -213,49 +231,93 @@ async def get_company(
         except Exception:
             pass
 
-    # 3. Fallback to COMPANY_DATA if no API overview and no cache
+    # 3. Fallback to yfinance if no API overview and no cache
     if not overview:
-        if t in COMPANY_DATA:
-            fallback = COMPANY_DATA[t].copy()
-            if quote:
-                fallback["price"] = quote.price or fallback["price"]
-                fallback["change"] = quote.change or fallback["change"]
-                fallback["changePercent"] = ((quote.change_percent * 100.0) if quote.change_percent else fallback["changePercent"])
-            return fallback
-        else:
-            # Dynamic mock details for unknown ticker
-            price_val = quote.price if (quote and quote.price) else 150.00
-            change_val = quote.change if (quote and quote.change) else 1.50
-            change_pct_val = ((quote.change_percent * 100.0) if quote.change_percent else 1.00) if quote else 1.00
-            mcap_val = format_market_cap(quote.market_cap) if (quote and quote.market_cap) else "100B"
+        try:
+            ticker_obj = yf.Ticker(t)
+            info = ticker_obj.info
+            
+            # Use market_service quote if available, otherwise yfinance info
+            price_val = quote.price if (quote and quote.price) else info.get("currentPrice") or info.get("previousClose") or 0.0
+            
+            change_val = 0.0
+            change_pct_val = 0.0
+            if quote and quote.change is not None:
+                change_val = quote.change
+                change_pct_val = (quote.change_percent * 100.0) if quote.change_percent else 0.0
+            elif info.get("currentPrice") and info.get("previousClose"):
+                change_val = info["currentPrice"] - info["previousClose"]
+                change_pct_val = (change_val / info["previousClose"]) * 100.0 if info["previousClose"] else 0.0
+                
+            mcap = info.get("marketCap", 0)
+            
+            rev = info.get("totalRevenue", 0)
+            rev_growth = info.get("revenueGrowth")
+            rev_growth_str = f"{rev_growth * 100.0:+.1f}% YoY" if rev_growth is not None else "N/A"
+            
+            gross_margin = info.get("grossMargins")
+            op_margin = info.get("operatingMargins")
+            
+            net_income = info.get("netIncomeToCommon", 0)
+            fcf = info.get("freeCashflow", 0)
+            
+            pe = info.get("trailingPE")
+            fpe = info.get("forwardPE")
+            ps = info.get("priceToSalesTrailing12Months")
+            dy = info.get("dividendYield")
+            
             return {
-                "name": f"{t} Corporation",
+                "name": info.get("shortName", info.get("longName", f"{t} Corporation")),
                 "ticker": t,
                 "price": price_val,
                 "change": change_val,
                 "changePercent": change_pct_val,
-                "marketCap": mcap_val,
-                "sector": "Technology",
-                "industry": "Consumer Electronics",
-                "about": f"{t} is a global provider of premium hardware and software solutions.",
+                "marketCap": format_market_cap(mcap) if mcap else "N/A",
+                "sector": info.get("sector", "N/A"),
+                "industry": info.get("industry", "N/A"),
+                "about": info.get("longBusinessSummary", ""),
                 "metrics": {
-                    "peRatio": "20.5x",
-                    "forwardPe": "18.2x",
-                    "priceToSales": "3.5x",
-                    "dividendYield": "1.25%",
-                    "beta": "1.00",
-                    "52W High": f"${price_val * 1.2:.2f}",
-                    "52W Low": f"${price_val * 0.8:.2f}"
+                    "peRatio": f"{pe:.1f}x" if pe else "N/A",
+                    "forwardPe": f"{fpe:.1f}x" if fpe else "N/A",
+                    "priceToSales": f"{ps:.1f}x" if ps else "N/A",
+                    "dividendYield": f"{dy * 100.0:.2f}%" if dy else "N/A",
+                    "beta": f"{info.get('beta'):.2f}" if info.get("beta") else "N/A",
+                    "52W High": f"${info.get('fiftyTwoWeekHigh'):.2f}" if info.get("fiftyTwoWeekHigh") else "N/A",
+                    "52W Low": f"${info.get('fiftyTwoWeekLow'):.2f}" if info.get("fiftyTwoWeekLow") else "N/A"
                 },
                 "financials": {
-                    "revenue": "10.0B TTM",
-                    "revenueGrowth": "5.0% YoY",
-                    "grossMargin": "45.0%",
-                    "operatingMargin": "20.0%",
-                    "netIncome": "2.0B",
-                    "freeCashFlow": "1.5B"
+                    "revenue": f"{format_market_cap(rev)} TTM" if rev else "N/A",
+                    "revenueGrowth": rev_growth_str,
+                    "grossMargin": f"{gross_margin * 100.0:.1f}%" if gross_margin else "N/A",
+                    "operatingMargin": f"{op_margin * 100.0:.1f}%" if op_margin else "N/A",
+                    "netIncome": format_market_cap(net_income) if net_income else "N/A",
+                    "freeCashFlow": format_market_cap(fcf) if fcf else "N/A"
                 },
-                "aiSummary": f"AI models view {t} as a stable player within its sector, with solid capital positions but facing headwinds from regulatory updates."
+                "aiSummary": f"{info.get('shortName', t)} operates in the {info.get('industry', 'N/A')} industry within the {info.get('sector', 'N/A')} sector."
+            }
+        except Exception as e:
+            logger.error("Failed to fetch yfinance info for %s: %s", t, e)
+            # Final fallback
+            price_val = quote.price if (quote and quote.price) else 0.0
+            return {
+                "name": f"{t} Corporation",
+                "ticker": t,
+                "price": price_val,
+                "change": quote.change if (quote and quote.change) else 0.0,
+                "changePercent": ((quote.change_percent * 100.0) if quote.change_percent else 0.0) if quote else 0.0,
+                "marketCap": "N/A",
+                "sector": "Unknown",
+                "industry": "Unknown",
+                "about": "Data unavailable.",
+                "metrics": {
+                    "peRatio": "N/A", "forwardPe": "N/A", "priceToSales": "N/A", 
+                    "dividendYield": "N/A", "beta": "N/A", "52W High": "N/A", "52W Low": "N/A"
+                },
+                "financials": {
+                    "revenue": "N/A", "revenueGrowth": "N/A", "grossMargin": "N/A",
+                    "operatingMargin": "N/A", "netIncome": "N/A", "freeCashFlow": "N/A"
+                },
+                "aiSummary": "No fundamental data available."
             }
 
     # 4. Map OVERVIEW + Quote to frontend format
@@ -328,11 +390,7 @@ async def get_company(
 
     ai_summary = f"{overview.get('Name')} is a leading player in the {overview.get('Sector', 'N/A').title()} sector, specifically {overview.get('Industry', 'N/A')}. With a market capitalization of {format_market_cap(overview.get('MarketCapitalization'))}, it exhibits solid margins (Operating Margin of {op_margin_str}) and recent quarterly revenue growth of {rev_growth_str}."
 
-    try:
-        analyst_target = float(overview.get("AnalystTargetPrice", 150.0))
-    except (TypeError, ValueError):
-        analyst_target = 150.0
-    price_out = quote.price if (quote and quote.price) else analyst_target
+    price_out = quote.price if (quote and quote.price) else float(overview.get("AnalystTargetPrice", 150.0))
     change_out = quote.change if (quote and quote.change) else 0.0
     change_pct_out = ((quote.change_percent * 100.0) if quote.change_percent else 0.0) if quote else 0.0
 

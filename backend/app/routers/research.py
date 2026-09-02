@@ -2,15 +2,38 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.auth import get_current_user
-from app.models.research import Report
+from app.models.research import Report, Document
+from app.models.portfolio import Holding
+from app.services import chat_service
+from app.services import market_service
 from typing import List, Dict, Any
+from datetime import datetime
 
-router = APIRouter(
-    prefix="/research",
-    tags=["research"]
-)
+router = APIRouter(prefix="/research", tags=["research"])
 
-# Seeding helper for default reports
+
+def _report_to_dict(r: Report) -> dict:
+    return {
+        "id": r.id,
+        "ticker": r.ticker,
+        "title": r.title,
+        "summary": r.summary,
+        "status": r.status,
+        "createdAt": r.created_at.strftime("%Y-%m-%d %H:%M"),
+        "content": r.content
+    }
+
+
+def _document_to_dict(d: Document) -> dict:
+    return {
+        "id": d.id,
+        "name": d.name,
+        "size": d.size,
+        "status": d.status,
+        "uploadedAt": d.uploaded_at.strftime("%Y-%m-%d %H:%M"),
+    }
+
+
 def ensure_default_reports(user_id: int, db: Session):
     count = db.query(Report).filter(Report.user_id == user_id).count()
     if count == 0:
@@ -36,6 +59,7 @@ def ensure_default_reports(user_id: int, db: Session):
             db.add(r)
         db.commit()
 
+
 @router.get("/reports")
 def get_reports(
     current_user: dict = Depends(get_current_user),
@@ -43,20 +67,9 @@ def get_reports(
 ):
     user_id = current_user["id"]
     ensure_default_reports(user_id, db)
-    reports = db.query(Report).filter(Report.user_id == user_id).all()
-    
-    result = []
-    for r in reports:
-        result.append({
-            "id": r.id,
-            "ticker": r.ticker,
-            "title": r.title,
-            "summary": r.summary,
-            "status": r.status,
-            "createdAt": r.created_at.strftime("%Y-%m-%d %H:%M"),
-            "content": r.content
-        })
-    return result
+    reports = db.query(Report).filter(Report.user_id == user_id).order_by(Report.created_at.desc()).all()
+    return [_report_to_dict(r) for r in reports]
+
 
 @router.post("/reports")
 def generate_report(
@@ -65,74 +78,152 @@ def generate_report(
     db: Session = Depends(get_db)
 ):
     user_id = current_user["id"]
-    ticker = data.get("ticker", "AAPL").upper()
-    title = f"{ticker} Deep Research Report"
-    summary = f"Comprehensive AI-generated research on {ticker} financials and market sentiments."
-    
+    ticker = data.get("ticker", "AAPL").upper().strip()
+
+    title = data.get("title") or f"{ticker} Deep Research Report"
+    summary = data.get("summary") or f"Comprehensive AI-generated research on {ticker} financials and market sentiments."
+    content = data.get("content") or (
+        f"## {ticker} Research Report\n\n### Executive Summary\n"
+        f"Analysis of {ticker} performance shows favorable technicals and strong fundamental growth.\n\n"
+        f"### Key Metrics\nPE Ratio is in line with historical industry median. Return on Equity remains robust."
+    )
+
     new_report = Report(
         user_id=user_id,
         ticker=ticker,
         title=title,
         summary=summary,
         status="completed",
-        content=f"## {ticker} Research Report\n\n### Executive Summary\nAnalysis of {ticker} performance shows favorable technicals and strong fundamental growth.\n\n### Key Metrics\nPE Ratio is in line with historical industry median. Return on Equity remains robust."
+        content=content,
     )
-    
+
     db.add(new_report)
     db.commit()
     db.refresh(new_report)
-    
-    return {
-        "id": new_report.id,
-        "ticker": new_report.ticker,
-        "title": new_report.title,
-        "summary": new_report.summary,
-        "status": new_report.status,
-        "createdAt": new_report.created_at.strftime("%Y-%m-%d %H:%M"),
-        "content": new_report.content
-    }
+    return _report_to_dict(new_report)
+
+
+@router.delete("/reports/{report_id}", status_code=204)
+def delete_report(
+    report_id: int,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    user_id = current_user["id"]
+    report = db.query(Report).filter(Report.id == report_id, Report.user_id == user_id).first()
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    db.delete(report)
+    db.commit()
+    return None
+
+
+@router.get("/documents")
+def get_documents(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    user_id = current_user["id"]
+    docs = db.query(Document).filter(Document.user_id == user_id).order_by(Document.uploaded_at.desc()).all()
+    return [_document_to_dict(d) for d in docs]
+
+
+@router.post("/documents", status_code=201)
+def create_document(
+    data: dict,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    user_id = current_user["id"]
+    name = data.get("name", "").strip()
+    size = data.get("size", "0 B")
+    status = data.get("status", "Processing")
+
+    if not name:
+        raise HTTPException(status_code=400, detail="Document name is required")
+
+    doc = Document(user_id=user_id, name=name, size=size, status=status)
+    db.add(doc)
+    db.commit()
+    db.refresh(doc)
+    return _document_to_dict(doc)
+
+
+@router.patch("/documents/{doc_id}")
+def update_document(
+    doc_id: int,
+    data: dict,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    user_id = current_user["id"]
+    doc = db.query(Document).filter(Document.id == doc_id, Document.user_id == user_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    if "status" in data:
+        doc.status = data["status"]
+    if "name" in data:
+        doc.name = data["name"]
+
+    db.add(doc)
+    db.commit()
+    db.refresh(doc)
+    return _document_to_dict(doc)
+
+
+@router.delete("/documents/{doc_id}", status_code=204)
+def delete_document(
+    doc_id: int,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    user_id = current_user["id"]
+    doc = db.query(Document).filter(Document.id == doc_id, Document.user_id == user_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    db.delete(doc)
+    db.commit()
+    return None
+
 
 @router.post("/chat")
-def chat_response(
+async def chat_response(
     data: dict,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
+    user_id = current_user["id"]
     message = data.get("message", "")
-    # Simple simulated intelligent chatbot response based on ticker detection
-    response = "I'm FinPilot AI, your premium workspace. I can help analyze your portfolio, watchlist, and research reports."
-    citations = []
-    
-    msg_lower = message.lower()
-    if "nvda" in msg_lower or "nvidia" in msg_lower:
-        response = (
-            "NVIDIA's latest results show exceptional revenue growth driven by the "
-            "Data Center segment and massive Blackwell GPU demand. Profit margins remain "
-            "at record highs above 75%, though foundry capacity limits are the key bottleneck."
-        )
-        citations = [
-            {"title": "NVDA Q4 Earnings Release", "type": "SEC Filing"},
-            {"title": "Blackwell Yield Assessment", "type": "Market Data"}
-        ]
-    elif "aapl" in msg_lower or "apple" in msg_lower:
-        response = (
-            "Apple is benefiting from record Services revenue and high gross margins. "
-            "However, flat iPhone sales volume and domestic regulator headwinds (antitrust) "
-            "remain active risks."
-        )
-        citations = [
-            {"title": "Apple Q3 10-Q Filing", "type": "SEC Filing"}
-        ]
-    elif "portfolio" in msg_lower or "holdings" in msg_lower:
-        response = (
-            "Your portfolio value is currently $128,450, showing an annual gain of 8.42%. "
-            "Your largest exposures are in technology (AAPL, NVDA), representing moderate to "
-            "high concentration risk."
-        )
-        citations = [
-            {"title": "Personal Portfolio Summary", "type": "Database"}
-        ]
+    history = data.get("history")
 
-    return {
-        "content": response,
-        "citations": citations
-    }
+    holdings_ctx = []
+    holdings = db.query(Holding).filter(Holding.user_id == user_id).all()
+    for h in holdings:
+        cost_basis = h.shares * h.avg_cost
+        market_value = h.shares * h.current_price
+        pnl = market_value - cost_basis
+        pnl_percent = (pnl / cost_basis * 100.0) if cost_basis > 0 else 0.0
+        holdings_ctx.append({
+            "ticker": h.ticker,
+            "name": h.name,
+            "shares": h.shares,
+            "avgCost": h.avg_cost,
+            "currentPrice": h.current_price,
+            "pnl": pnl,
+            "pnlPercent": pnl_percent,
+        })
+
+    reports_ctx = [
+        {"ticker": r.ticker, "title": r.title}
+        for r in db.query(Report).filter(Report.user_id == user_id)
+                    .order_by(Report.created_at.desc()).limit(10).all()
+    ]
+
+    result = chat_service.chat(
+        message=message,
+        history=history,
+        holdings=holdings_ctx or None,
+        reports=reports_ctx or None,
+    )
+    return result

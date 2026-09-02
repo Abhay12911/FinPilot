@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { getPortfolioSummary, getWatchlist, getPortfolioPerformance } from '../services/portfolio';
+import { getPortfolioSummary, getPortfolioHoldings, getPortfolioPerformance } from '../services/portfolio';
 import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
   AreaChart, Area, XAxis, YAxis, CartesianGrid
@@ -7,15 +7,9 @@ import {
 import { Plus, Filter, ArrowUpRight, ArrowDownRight, Trash2, Search, BarChart2 } from 'lucide-react';
 import { SkeletonBlock, SkeletonChart } from '../components/ui/Skeleton';
 
-const COLORS = ['#050505', '#3D3D3D', '#6B6B6B', '#9E9E9E', '#C8C8C8'];
+import { getCachedData, setCachedData } from '../utils/cache';
 
-const MOCK_HOLDINGS = [
-  { ticker: 'NVDA', name: 'NVIDIA Corporation', shares: 150, avgPrice: 78.50, currentPrice: 182.45, change: 3.42, sector: 'Technology' },
-  { ticker: 'AAPL', name: 'Apple Inc.', shares: 200, avgPrice: 155.20, currentPrice: 231.40, change: -0.42, sector: 'Technology' },
-  { ticker: 'MSFT', name: 'Microsoft Corp.', shares: 80, avgPrice: 310.00, currentPrice: 511.20, change: 1.24, sector: 'Technology' },
-  { ticker: 'AMZN', name: 'Amazon.com Inc.', shares: 100, avgPrice: 135.60, currentPrice: 228.31, change: 2.10, sector: 'Consumer' },
-  { ticker: 'GOOGL', name: 'Alphabet Inc.', shares: 50, avgPrice: 140.00, currentPrice: 198.75, change: 0.85, sector: 'Technology' },
-];
+const COLORS = ['#050505', '#3D3D3D', '#6B6B6B', '#9E9E9E', '#C8C8C8'];
 
 const CustomPieTooltip = ({ active, payload }) => {
   if (active && payload && payload.length) {
@@ -30,10 +24,10 @@ const CustomPieTooltip = ({ active, payload }) => {
 };
 
 export const Portfolio = () => {
-  const [summary, setSummary] = useState(null);
-  const [holdings] = useState(MOCK_HOLDINGS);
-  const [performanceData, setPerformanceData] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [summary, setSummary] = useState(() => getCachedData('portfolio_summary', null));
+  const [holdings, setHoldings] = useState(() => getCachedData('portfolio_holdings', []));
+  const [performanceData, setPerformanceData] = useState(() => getCachedData('portfolio_perf', []));
+  const [loading, setLoading] = useState(() => !getCachedData('portfolio_summary', null));
   const [searchQuery, setSearchQuery] = useState('');
   const [sortKey, setSortKey] = useState('marketValue');
   const [sortDir, setSortDir] = useState('desc');
@@ -41,9 +35,26 @@ export const Portfolio = () => {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [sum, perf] = await Promise.all([getPortfolioSummary(), getPortfolioPerformance()]);
+        const [sum, perf, rawHoldings] = await Promise.all([
+          getPortfolioSummary(),
+          getPortfolioPerformance(),
+          getPortfolioHoldings(),
+        ]);
         setSummary(sum);
         setPerformanceData(perf);
+        const mappedHoldings = (rawHoldings || []).map((h) => ({
+          ticker: h.ticker,
+          name: h.name,
+          shares: h.shares,
+          avgPrice: h.avgCost,
+          currentPrice: h.currentPrice,
+          change: h.change ?? 0,
+          sector: h.sector ?? 'Other',
+        }));
+        setHoldings(mappedHoldings);
+        setCachedData('portfolio_summary', sum);
+        setCachedData('portfolio_perf', perf);
+        setCachedData('portfolio_holdings', mappedHoldings);
       } catch (e) {
         console.error(e);
       } finally {

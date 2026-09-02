@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { getWatchlist, addToWatchlist, removeFromWatchlist } from '../services/portfolio';
+import { getMarketHistory } from '../services/marketService';
 import { ChartCard } from '../components/ui/ChartCard';
 import { SignalBadge } from '../components/ui/SignalBadge';
 import { Plus, Search, Trash2, ArrowUpRight, ArrowDownRight, X, Bookmark } from 'lucide-react';
@@ -7,31 +8,55 @@ import { useNavigate } from 'react-router-dom';
 import { SkeletonTable } from '../components/ui/Skeleton';
 import { EmptyState } from '../components/ui/EmptyState';
 
+import { getCachedData, setCachedData } from '../utils/cache';
+
 export const Watchlist = () => {
-  const [watchlists, setWatchlists] = useState([{ id: 1, name: 'Main Watchlist', stocks: [] }]);
+  const [watchlists, setWatchlists] = useState(() => getCachedData('watchlist_page_data', [{ id: 1, name: 'Main Watchlist', stocks: [] }]));
   const [activeList, setActiveList] = useState(1);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => {
+    const cached = getCachedData('watchlist_page_data', null);
+    return !cached || !cached[0]?.stocks?.length;
+  });
   const [showAddModal, setShowAddModal] = useState(false);
   const [newTicker, setNewTicker] = useState('');
   const [newName, setNewName] = useState('');
   const navigate = useNavigate();
 
-  const generateSparkline = (isPositive) => {
-    const data = [];
-    let val = 50;
-    for (let i = 0; i < 20; i++) {
-      val += (Math.random() - (isPositive ? 0.35 : 0.65)) * 4;
-      data.push({ value: val });
+  /**
+   * Fetch real 7-day close-price history for a single ticker.
+   * The endpoint returns { data: [{timestamp, close, ...}] } — same shape
+   * CompanyWorkspace.jsx uses for its 30-day chart.
+   * Falls back to an empty array on any failure so other stocks still render.
+   */
+  const fetchSparkline = async (ticker) => {
+    try {
+      const hist = await getMarketHistory(ticker, '1day', 7);
+      const points = Array.isArray(hist) ? hist : (hist?.data || []);
+      return points
+        .slice(-7)
+        .map(d => ({ value: d.close ?? 0 }))
+        .reverse(); // oldest → newest
+    } catch {
+      return [];
     }
-    return data;
   };
 
   const loadData = async () => {
     try {
       const stocks = await getWatchlist();
-      setWatchlists([
-        { id: 1, name: 'Main Watchlist', stocks: stocks.map(s => ({ ...s, sparkline: generateSparkline(s.changePercent >= 0) })) },
-      ]);
+
+      // Fetch all sparklines concurrently — one round of network calls.
+      const sparklines = await Promise.all(stocks.map(s => fetchSparkline(s.ticker)));
+
+      const updatedWatchlists = [
+        {
+          id: 1,
+          name: 'Main Watchlist',
+          stocks: stocks.map((s, i) => ({ ...s, sparkline: sparklines[i] })),
+        },
+      ];
+      setWatchlists(updatedWatchlists);
+      setCachedData('watchlist_page_data', updatedWatchlists);
     } catch (e) {
       console.error(e);
     } finally {

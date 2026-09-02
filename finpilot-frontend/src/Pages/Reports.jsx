@@ -4,21 +4,6 @@ import { Search, Filter, Download, Trash2, Copy, ArrowRight, TrendingUp, AlertTr
 import { SkeletonBlock } from '../components/ui/Skeleton';
 import { EmptyState } from '../components/ui/EmptyState';
 
-const RiskBadge = ({ level }) => {
-  const styles = {
-    Low: 'bg-[#E6F4EA] text-[#137333] border-[#CEEAD6]',
-    Medium: 'bg-[#FEF3C7] text-[#92400E] border-[#FDE68A]',
-    High: 'bg-[#FCE8E6] text-[#C5221F] border-[#FAD2CF]',
-  };
-  const icons = { Low: TrendingUp, Medium: Activity, High: AlertTriangle };
-  const Icon = icons[level] || Activity;
-  return (
-    <span className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold font-mono border ${styles[level] || styles.Medium}`}>
-      <Icon size={10} /> {level}
-    </span>
-  );
-};
-
 export const Reports = () => {
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -50,10 +35,15 @@ export const Reports = () => {
     }
   };
 
-  const filtered = reports.filter(r =>
-    r.company.toLowerCase().includes(search.toLowerCase()) ||
-    r.ticker.toLowerCase().includes(search.toLowerCase())
-  );
+  // Backend returns: { id, ticker, title, summary, status, createdAt, content }
+  // Search on title + ticker (not the old localStorage "company" field)
+  const filtered = reports.filter(r => {
+    const q = search.toLowerCase();
+    return (
+      (r.title || '').toLowerCase().includes(q) ||
+      (r.ticker || '').toLowerCase().includes(q)
+    );
+  });
 
   if (loading) {
     return (
@@ -83,7 +73,7 @@ export const Reports = () => {
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
         <div>
           <h1 className="text-[28px] font-bold tracking-tight text-[#050505]">My Reports</h1>
-          <p className="text-[13px] text-[#595959] mt-1">{reports.length} research reports generated.</p>
+          <p className="text-[13px] text-[#595959] mt-1">{reports.length} research report{reports.length !== 1 ? 's' : ''} generated.</p>
         </div>
         <div className="flex items-center gap-3">
           <div className="relative">
@@ -108,36 +98,39 @@ export const Reports = () => {
           <div key={report.id} className="rounded-xl border border-[#E5E5E5] bg-white p-6 shadow-sm hover:shadow-md hover:border-[#D9D9D9] transition-all duration-200 flex flex-col gap-4">
             <div className="flex items-start justify-between gap-2">
               <div>
-                <div className="flex items-center gap-2 mb-1">
+                <div className="flex items-center gap-2 mb-1 flex-wrap">
                   <span className="font-bold text-lg text-[#050505]">{report.ticker}</span>
-                  <span className="font-mono text-[10px] bg-[#F5F5F5] border border-[#E5E5E5] px-2 py-0.5 rounded text-[#525252]">{report.type}</span>
-                  <RiskBadge level={report.riskLevel} />
+                  {/* status badge — shows "completed" / "pending" / "processing" */}
+                  {report.status && (
+                    <span className="font-mono text-[10px] bg-[#F5F5F5] border border-[#E5E5E5] px-2 py-0.5 rounded text-[#525252] capitalize">
+                      {report.status}
+                    </span>
+                  )}
                 </div>
-                <p className="text-[13px] text-[#595959]">{report.company}</p>
+                {/* title is the human-readable report name */}
+                <p className="text-[13px] text-[#595959] line-clamp-1">{report.title}</p>
               </div>
-              <span className="font-mono text-[11px] text-[#8C8C8C] shrink-0">{report.date}</span>
+              {/* createdAt from the backend, e.g. "2026-09-01 10:32" */}
+              <span className="font-mono text-[11px] text-[#8C8C8C] shrink-0 whitespace-nowrap">{report.createdAt}</span>
             </div>
 
-            <p className="text-[13px] text-[#595959] leading-relaxed line-clamp-2">{report.summary}</p>
+            {report.summary && (
+              <p className="text-[13px] text-[#595959] leading-relaxed line-clamp-2">{report.summary}</p>
+            )}
 
-            <div className="flex items-center gap-3 pt-2 border-t border-[#F0F0F0]">
-              <span className="font-mono text-[11px] text-[#8C8C8C]">{report.sources} sources</span>
-              <span className="font-mono text-[11px] text-[#8C8C8C]">•</span>
-              <span className="font-mono text-[11px] text-[#8C8C8C]">{report.sections} sections</span>
-              <div className="ml-auto flex items-center gap-2">
-                <button aria-label={`Copy ${report.company} report`} className="p-1.5 rounded-md text-[#8C8C8C] hover:text-[#050505] hover:bg-[#F5F5F5] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#050505]"><Copy size={14} /></button>
-                <button aria-label={`Download ${report.company} report`} className="p-1.5 rounded-md text-[#8C8C8C] hover:text-[#050505] hover:bg-[#F5F5F5] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#050505]"><Download size={14} /></button>
-                <button
-                  onClick={() => handleDelete(report.id)}
-                  aria-label={`Delete ${report.company} report`}
-                  className="p-1.5 rounded-md text-[#8C8C8C] hover:text-red-500 hover:bg-[#FEF2F2] transition-colors cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500"
-                >
-                  <Trash2 size={14} />
-                </button>
-                <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#050505] text-white text-[12px] font-semibold hover:bg-[#1A1A1A] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#050505]">
-                  Open <ArrowRight size={12} />
-                </button>
-              </div>
+            <div className="flex items-center gap-2 pt-2 border-t border-[#F0F0F0] ml-auto">
+              <button aria-label={`Copy ${report.ticker} report`} className="p-1.5 rounded-md text-[#8C8C8C] hover:text-[#050505] hover:bg-[#F5F5F5] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#050505]"><Copy size={14} /></button>
+              <button aria-label={`Download ${report.ticker} report`} className="p-1.5 rounded-md text-[#8C8C8C] hover:text-[#050505] hover:bg-[#F5F5F5] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#050505]"><Download size={14} /></button>
+              <button
+                onClick={() => handleDelete(report.id)}
+                aria-label={`Delete ${report.ticker} report`}
+                className="p-1.5 rounded-md text-[#8C8C8C] hover:text-red-500 hover:bg-[#FEF2F2] transition-colors cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500"
+              >
+                <Trash2 size={14} />
+              </button>
+              <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#050505] text-white text-[12px] font-semibold hover:bg-[#1A1A1A] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#050505]">
+                Open <ArrowRight size={12} />
+              </button>
             </div>
           </div>
         ))}

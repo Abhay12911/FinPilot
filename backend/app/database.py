@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "CHANGE_THIS_TO_A_RANDOM_SECRET_KEY"
     ALPHA_VANTAGE_KEY: str = ""
     TWELVE_DATA_KEY: str = "demo"
+    GROQ_API_KEY: str = ""
 
     class Config:
         env_file = ".env"

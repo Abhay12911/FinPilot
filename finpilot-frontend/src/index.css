@@ -22,6 +22,42 @@ body {
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  color: #050505;
+}
+
+/* ============================================================
+   INPUT & AUTOFILL FIXES (high contrast, fix white-text glitch)
+   ============================================================ */
+input, select, textarea {
+  color: #050505 !important;
+  caret-color: #050505 !important;
+  -webkit-text-fill-color: #050505 !important;
+}
+
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active,
+textarea:-webkit-autofill,
+textarea:-webkit-autofill:hover,
+textarea:-webkit-autofill:focus,
+textarea:-webkit-autofill:active,
+select:-webkit-autofill,
+select:-webkit-autofill:hover,
+select:-webkit-autofill:focus,
+select:-webkit-autofill:active {
+  -webkit-text-fill-color: #050505 !important;
+  -webkit-box-shadow: 0 0 0px 1000px #f0f5ff inset !important;
+  box-shadow: 0 0 0px 1000px #f0f5ff inset !important;
+  border-color: #a3a3a3 !important;
+  transition: background-color 5000s ease-in-out 0s;
+  color: #050505 !important;
+}
+
+input::placeholder, textarea::placeholder {
+  color: #a3a3a3 !important;
+  -webkit-text-fill-color: #a3a3a3 !important;
+  opacity: 1;
 }
 
 /* ============================================================
@@ -299,3 +335,37 @@ body {
 .text-balance { text-wrap: balance; }
 .transition-fast { transition: all 0.15s ease; }
 .rounded-xl { border-radius: 16px; }
+
+/* ============================================================
+   SKELETON SHIMMER ANIMATION (ultra-smooth & subtle)
+   ============================================================ */
+@keyframes shimmer-sweep {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+@keyframes pulse-subtle {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.65; }
+}
+
+.skeleton-shimmer {
+  position: relative;
+  overflow: hidden;
+  background-color: #f1f5f9 !important;
+  animation: pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.skeleton-shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.75) 50%,
+    transparent 100%
+  );
+  animation: shimmer-sweep 1.6s ease-in-out infinite;
+}

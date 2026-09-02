@@ -1,57 +1,30 @@
-import { getToken } from './api';
+import { apiFetch } from './api';
 
-const BASE_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
-
-async function apiRequest(path, options = {}) {
-  const headers = { ...(options.headers || {}) };
-  const token = getToken();
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-
-  if (options.body && !headers['Content-Type']) {
-    headers['Content-Type'] = 'application/json';
-  }
-
-  const res = await fetch(`${BASE_URL}${path}`, { ...options, headers });
-  if (!res.ok) {
-    let detail = `Request failed: ${res.status}`;
-    try {
-      const json = await res.json();
-      detail = json.detail || detail;
-    } catch {
-      detail = `Request failed: ${res.status}`;
-    }
-    throw new Error(detail);
-  }
-  return res.json();
+export function getPortfolioSummary() {
+  return apiFetch('/portfolio/summary');
 }
 
-export const getPortfolioSummary = async () => {
-  return apiRequest('/portfolio/summary');
-};
+export function getPortfolioPerformance() {
+  return apiFetch('/portfolio/performance');
+}
 
-export const getPortfolioPerformance = async () => {
-  return apiRequest('/portfolio/performance');
-};
+export function getPortfolioHoldings() {
+  return apiFetch('/portfolio/holdings');
+}
 
-export const getWatchlist = async () => {
-  return apiRequest('/portfolio/watchlist');
-};
+export function getWatchlist() {
+  return apiFetch('/portfolio/watchlist');
+}
 
-export const addToWatchlist = async (ticker, name) => {
-  return apiRequest('/portfolio/watchlist', {
+export function addToWatchlist(ticker, name) {
+  return apiFetch('/portfolio/watchlist', {
     method: 'POST',
-    body: JSON.stringify({ ticker, name })
+    body: { ticker: (ticker || '').toUpperCase().trim(), name: name || ticker },
   });
-};
+}
 
-export const removeFromWatchlist = async (ticker) => {
-  return apiRequest(`/portfolio/watchlist/${ticker}`, {
-    method: 'DELETE'
+export function removeFromWatchlist(ticker) {
+  return apiFetch(`/portfolio/watchlist/${encodeURIComponent(ticker)}`, {
+    method: 'DELETE',
   });
-};
-
-export const getHoldings = async () => {
-  return apiRequest('/portfolio/holdings');
-};
+}
