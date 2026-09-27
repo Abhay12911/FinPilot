@@ -48,6 +48,31 @@ Or use the requirements file:
 pip install -r requirements.txt
 ```
 
+The default database is SQLite, so the API can start without Docker. To use the
+included PostgreSQL container instead, start it from the repository root and set
+the following in `backend/.env`:
+
+```env
+DATABASE_URL=postgresql://finpilot:postgres@localhost:5432/finpilot
+REDIS_URL=redis://localhost:6379
+```
+
+After the API is running, load the initial NSE universe and one year of daily
+bars with:
+
+```bash
+python -m scripts.seed_market
+```
+
+For the complete containerized stack, from the repository root run:
+
+```bash
+docker compose up --build
+```
+
+The API is then available at `http://localhost:8000`, with liveness at
+`/health/live` and readiness at `/health/ready`.
+
 ### 3. Configure environment
 
 ```bash
@@ -114,6 +139,100 @@ SECRET_KEY=CHANGE_THIS_TO_A_RANDOM_64_CHAR_SECRET
 ---
 
 ## API Endpoints
+
+### Market foundation (`/api/v1`)
+
+The first market-data slice is available without authentication:
+
+```text
+GET  /stocks/search?q=reliance
+GET  /stocks/RELIANCE/quote
+GET  /stocks/RELIANCE/history
+GET  /market/gainers
+GET  /market/losers
+GET  /market/52-week-high
+GET  /market/52-week-low
+GET  /market/most-volume
+GET  /market/leaders
+GET  /market/laggards
+GET  /stocks/RELIANCE/indicators
+GET  /stocks/RELIANCE/attribution
+POST /chat
+POST /ai/query
+POST /ai/evidence
+```
+
+Market facts are calculated by the stock service and scanner from stored price
+bars. The AI endpoint uses the Responses API tool-calling loop when
+`OPENAI_API_KEY` is configured; it does not invent quote or history values.
+
+`POST /api/v1/chat` and `POST /api/v1/ai/query` work without an LLM key using
+deterministic local answers. To enable model synthesis, put the provider key and
+model in `backend/.env`:
+
+```env
+OPENAI_API_KEY=your-key-here
+OPENAI_MODEL=your-supported-model
+```
+
+The provider boundary is [providers.py](app/ai/providers.py); add another LLM
+there when you need Gemini, Anthropic, or a self-hosted model.
+
+### Free LLM setup
+
+The recommended free-compatible option is OpenRouter. Create an OpenRouter key
+and choose a model marked `:free`, then set:
+
+```env
+LLM_PROVIDER=openrouter
+LLM_API_KEY=your-openrouter-key
+LLM_BASE_URL=https://openrouter.ai/api/v1
+LLM_MODEL=meta-llama/llama-3.3-8b-instruct:free
+```
+
+Groq works through the same adapter:
+
+```env
+LLM_PROVIDER=groq
+LLM_API_KEY=your-groq-key
+LLM_BASE_URL=https://api.groq.com/openai/v1
+LLM_MODEL=llama-3.1-8b-instant
+```
+
+For a local Ollama model, no cloud key is needed:
+
+```env
+LLM_PROVIDER=ollama
+LLM_API_KEY=ollama
+LLM_BASE_URL=http://localhost:11434/v1
+LLM_MODEL=llama3.1:8b
+```
+
+Free chat providers commonly do not provide embeddings. The RAG system still
+works with hybrid lexical retrieval. For semantic embeddings, configure a
+separate compatible embedding service:
+
+```env
+EMBEDDING_API_KEY=your-embedding-key
+EMBEDDING_BASE_URL=https://api.openai.com/v1
+EMBEDDING_MODEL=text-embedding-3-small
+```
+
+Hugging Face embeddings are supported directly as well:
+
+```env
+EMBEDDING_PROVIDER=huggingface
+HF_API_KEY=your-huggingface-read-token
+HF_EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
+HF_EMBEDDING_URL=https://router.huggingface.co/hf-inference/models
+```
+
+Technical indicators are calculated server-side from persisted OHLCV bars. The
+attribution response separates measured price/volume/volatility facts from
+cached news and labels news as correlation-only evidence. Authenticated
+`/research/documents` routes support UTF-8 text upload, chunking, keyword
+retrieval, listing, and deletion; pgvector embeddings can be added behind this
+boundary later.
 
 ### Auth (`/auth`)
 

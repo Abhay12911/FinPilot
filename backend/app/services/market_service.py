@@ -8,6 +8,7 @@ from app.database import settings
 from app.models.market import MarketCache, MarketQuote
 from app.provider import twelve_data
 from app.provider import yahoo_finance
+from app.services import cache
 
 
 logger = logging.getLogger(__name__)
@@ -71,6 +72,9 @@ def _is_us_daylight_saving(now_utc: datetime) -> bool:
 
 # --- General Key-Value Cache Helpers ---
 def _get_cache_value(db: Session, key: str, ttl_minutes: int) -> Optional[Any]:
+    cached = cache.get_json(key)
+    if cached is not None:
+        return cached
     cached = db.query(MarketCache).filter(MarketCache.key == key).first()
     if cached:
         cutoff = datetime.utcnow() - timedelta(minutes=ttl_minutes)
@@ -82,6 +86,7 @@ def _get_cache_value(db: Session, key: str, ttl_minutes: int) -> Optional[Any]:
     return None
 
 def _set_cache_value(db: Session, key: str, value: Any):
+    cache.set_json(key, value, CACHE_TTL_MINUTES * 60)
     try:
         cached = db.query(MarketCache).filter(MarketCache.key == key).first()
         val_str = json.dumps(value)
