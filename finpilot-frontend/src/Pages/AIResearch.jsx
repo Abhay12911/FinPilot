@@ -109,7 +109,7 @@ export const AIResearch = () => {
                 <label className="font-mono text-[10px] text-[#8C8C8C] uppercase tracking-wider block mb-1.5">Company</label>
                 <input
                   value={config.company}
-                  onChange={e => setConfig(c => ({ ...c, company: e.target.value }))}
+                  onChange={e => setConfig(c => ({ ...c, company: e.target.value, ticker: '' }))}
                   className="w-full px-4 py-2.5 rounded-lg border border-[#E5E5E5] text-[13px] text-[#050505] outline-none focus:border-[#050505]"
                 />
               </div>
@@ -117,7 +117,7 @@ export const AIResearch = () => {
                 <label className="font-mono text-[10px] text-[#8C8C8C] uppercase tracking-wider block mb-1.5">Ticker</label>
                 <input
                   value={config.ticker}
-                  onChange={e => setConfig(c => ({ ...c, ticker: e.target.value }))}
+                  onChange={e => setConfig(c => ({ ...c, ticker: e.target.value, company: '' }))}
                   className="w-full px-4 py-2.5 rounded-lg border border-[#E5E5E5] text-[13px] text-[#050505] outline-none focus:border-[#050505]"
                 />
               </div>

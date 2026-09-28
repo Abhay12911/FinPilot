@@ -196,7 +196,7 @@ Groq works through the same adapter:
 LLM_PROVIDER=groq
 LLM_API_KEY=your-groq-key
 LLM_BASE_URL=https://api.groq.com/openai/v1
-LLM_MODEL=llama-3.1-8b-instant
+LLM_MODEL=openai/gpt-oss-20b
 ```
 
 For a local Ollama model, no cloud key is needed:

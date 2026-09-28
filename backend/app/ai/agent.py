@@ -86,7 +86,13 @@ def _chat_completion_tools() -> list[dict]:
     ]
 
 
-async def ask_finpilot(db: Session, message: str, current_symbol: str | None = None, user_id: int | None = None) -> str:
+async def ask_finpilot(
+    db: Session,
+    message: str,
+    current_symbol: str | None = None,
+    user_id: int | None = None,
+    evidence_context: str | None = None,
+) -> str:
     api_key = settings.LLM_API_KEY or settings.OPENAI_API_KEY
     if not api_key:
         raise ValueError("LLM_API_KEY is not configured")
@@ -98,9 +104,15 @@ async def ask_finpilot(db: Session, message: str, current_symbol: str | None = N
     context = ""
     if current_symbol:
         context = f"The user is viewing {current_symbol.strip().upper()}. Resolve references such as 'it' or 'this stock' to that symbol unless they name another stock."
+    evidence_instruction = (
+        f"\nVerified evidence collected for this request:\n{evidence_context}\n"
+        "Use these values for current market facts and do not replace them with guessed symbols or prices."
+        if evidence_context else ""
+    )
     instructions = f"""You are FinPilot, an AI financial research assistant.
 {context}
-Never invent live market data or calculate market values from memory. Use tools for current prices, historical data, returns, 52-week levels, technical indicators, price-move attribution, and indexed documents. Clearly distinguish tool-provided facts from interpretation; do not present correlation as causation. Be concise."""
+Never invent live market data or calculate market values from memory. Use tools for current prices, historical data, returns, 52-week levels, technical indicators, price-move attribution, and indexed documents. Clearly distinguish tool-provided facts from interpretation; do not present correlation as causation. Be concise.
+{evidence_instruction}"""
     client = AsyncOpenAI(
         api_key=api_key,
         base_url=settings.LLM_BASE_URL or None,
@@ -109,6 +121,16 @@ Never invent live market data or calculate market values from memory. Use tools 
 
     provider = settings.LLM_PROVIDER.strip().lower() or "openai"
     model = settings.LLM_MODEL or settings.OPENAI_MODEL
+
+    if evidence_context:
+        response = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": instructions},
+                {"role": "user", "content": message},
+            ],
+        )
+        return response.choices[0].message.content or "The model returned an empty answer."
 
     if provider != "openai" or settings.LLM_BASE_URL:
         messages: list[dict[str, Any]] = [
@@ -148,7 +170,12 @@ Never invent live market data or calculate market values from memory. Use tools 
                 except Exception as error:
                     output = json.dumps({"error": str(error)})
                 messages.append({"role": "tool", "tool_call_id": call.id, "content": output})
-        raise RuntimeError("The AI requested too many tool calls")
+        messages.append({
+            "role": "system",
+            "content": "Stop using tools. Synthesize the answer from the evidence already returned by the tools.",
+        })
+        response = await client.chat.completions.create(model=model, messages=messages)
+        return response.choices[0].message.content or "The model returned an empty answer."
 
     # Bound the loop so a malformed tool exchange cannot hold an HTTP request forever.
     for _ in range(4):
@@ -167,4 +194,9 @@ Never invent live market data or calculate market values from memory. Use tools 
             except Exception as error:
                 output = json.dumps({"error": str(error)})
             input_items.append({"type": "function_call_output", "call_id": call.call_id, "output": output})
-    raise RuntimeError("The AI requested too many tool calls")
+    input_items.append({
+        "role": "user",
+        "content": "Stop using tools. Synthesize the answer from the evidence already returned by the tools.",
+    })
+    response = await client.responses.create(model=model, instructions=instructions, input=input_items)
+    return response.output_text or "The model returned an empty answer."

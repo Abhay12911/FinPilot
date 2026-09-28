@@ -46,14 +46,19 @@ async def generate_report(
     db: Session = Depends(get_db)
 ):
     user_id = current_user["id"]
-    ticker = data.get("ticker", "AAPL").upper()
-    if not ticker:
-        raise HTTPException(status_code=422, detail="ticker is required")
-    question = data.get("question") or f"Provide a research report for {ticker} using current market data and available indexed evidence."
+    requested_ticker = str(data.get("ticker") or "").strip()
+    company = str(data.get("company") or "").strip()
+    lookup_context = requested_ticker or company
+    if not lookup_context:
+        raise HTTPException(status_code=422, detail="company or ticker is required")
+    question = data.get("question") or f"Provide a research report for {lookup_context} using current market data and available indexed evidence."
     try:
-        result = await answer_query(db, question, ticker, user_id)
+        result = await answer_query(db, question, lookup_context, user_id)
     except ValueError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
+    evidence = result.get("evidence") or []
+    ticker = next((item.get("ticker") for item in evidence if isinstance(item, dict) and item.get("ticker")), None)
+    ticker = ticker or requested_ticker.upper() or lookup_context.upper()
     title = f"{ticker} Deep Research Report"
     summary = f"Evidence-grounded research response for {ticker}."
     

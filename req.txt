@@ -1,4 +1,5 @@
 DATABASE_URL=postgresql://postgress:postgres@localhost:5432/postgress
 
-command to start db and redis-
-docker compose up -d
+commands to start the services and load market data-
+docker compose up -d --build
+docker compose exec api python -m scripts.seed_market
