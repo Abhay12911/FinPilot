@@ -77,6 +77,24 @@ async def fetch_quote(symbol: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+async def search_symbols(query: str) -> List[Dict[str, Any]]:
+    """Find Yahoo symbols, preferring Indian NSE and BSE equities."""
+    url = f"{YF_BASE}/v1/finance/search"
+    try:
+        async with httpx.AsyncClient(timeout=10, headers=YF_HEADERS) as client:
+            response = await client.get(url, params={"q": query, "quotesCount": 15, "newsCount": 0})
+            response.raise_for_status()
+            quotes = response.json().get("quotes", [])
+        return [
+            quote for quote in quotes
+            if quote.get("quoteType") == "EQUITY"
+            and (str(quote.get("symbol", "")).endswith(".NS") or str(quote.get("symbol", "")).endswith(".BO"))
+        ]
+    except Exception as exc:
+        logger.error("Yahoo Finance symbol search failed for %s: %s", query, exc)
+        return []
+
+
 async def fetch_batch_quotes(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
     async def _fetch_one(sym: str):
         q = await fetch_quote(sym)

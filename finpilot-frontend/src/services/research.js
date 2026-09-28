@@ -38,6 +38,7 @@ export const runDeepResearch = async (config) => {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       ticker: config.ticker,
+      company: config.company,
       question: `${config.objective || 'Comprehensive investment analysis'} for ${config.company || config.ticker}. Include market facts, technical risks, recent move context, and clearly label uncertainty.`,
     }),
   });
