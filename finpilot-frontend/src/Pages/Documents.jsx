@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Upload, Search, FileText, Trash2, MessageSquare, CheckCircle, Loader2, Clock } from 'lucide-react';
-import { getDocuments, uploadDocument, deleteDocument, updateDocumentStatus } from '../services/research';
+import { getDocuments, uploadDocument, deleteDocument } from '../services/research';
 import { SkeletonTable } from '../components/ui/Skeleton';
 import { EmptyState } from '../components/ui/EmptyState';
 
@@ -31,15 +31,10 @@ export const Documents = () => {
     loadData();
   }, []);
 
-  const handleFileUpload = async (fileName, fileSize) => {
+  const handleFileUpload = async (file) => {
     try {
-      const newDoc = await uploadDocument(fileName, fileSize);
+      await uploadDocument(file);
       await loadData();
-
-      setTimeout(async () => {
-        await updateDocumentStatus(newDoc.id, 'indexed');
-        await loadData();
-      }, 2500);
     } catch (e) {
       console.error(e);
     }
@@ -50,16 +45,14 @@ export const Documents = () => {
     setDragOver(false);
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       const file = e.dataTransfer.files[0];
-      const sizeStr = (file.size / (1024 * 1024)).toFixed(1) + ' MB';
-      handleFileUpload(file.name, sizeStr);
+      handleFileUpload(file);
     }
   };
 
   const handleFileSelect = (e) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
-      const sizeStr = (file.size / (1024 * 1024)).toFixed(1) + ' MB';
-      handleFileUpload(file.name, sizeStr);
+      handleFileUpload(file);
     }
   };
 
@@ -108,14 +101,14 @@ export const Documents = () => {
           type="file"
           className="hidden"
           onChange={handleFileSelect}
-          accept=".pdf,.docx,.txt,.csv"
+          accept=".pdf,.txt,.md,.csv,.json,.log"
         />
         <div className="w-12 h-12 rounded-xl bg-[#F5F5F5] flex items-center justify-center">
           <Upload size={22} className="text-[#8C8C8C]" />
         </div>
         <div className="text-center">
           <p className="font-semibold text-[#050505]">Drop files here or click to upload</p>
-          <p className="text-[13px] text-[#8C8C8C] mt-1">Supports PDF, DOCX, TXT, CSV — up to 50MB each</p>
+          <p className="text-[13px] text-[#8C8C8C] mt-1">Supports PDF, TXT, Markdown, CSV, JSON — up to 10MB each</p>
         </div>
       </label>
 

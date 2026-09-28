@@ -24,7 +24,7 @@ router = APIRouter(
 # JWT CONFIG
 
 
-SECRET_KEY = "CHANGE_THIS_TO_A_RANDOM_SECRET"
+SECRET_KEY = settings.SECRET_KEY
 ALGORITHM = "HS256"
 
 oauth2_bearer = OAuth2PasswordBearer(
@@ -241,5 +241,4 @@ async def get_me(
         Depends(get_current_user)
     ]
 ):
-    return current_user
     return current_user

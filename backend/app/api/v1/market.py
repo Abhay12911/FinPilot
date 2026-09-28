@@ -21,8 +21,44 @@ from app.schemas.market import (
     CommodityQuote,
     MarketSignalResponse
 )
+from app.services.market_scanner import MarketScanner
 
 router = APIRouter(prefix="/api/v1/market", tags=["Market Overview"])
+
+
+@router.get("/gainers")
+def gainers(limit: int = Query(10, ge=1, le=100), db: Session = Depends(get_db)):
+    return MarketScanner(db).top_gainers(limit)
+
+
+@router.get("/losers")
+def losers(limit: int = Query(10, ge=1, le=100), db: Session = Depends(get_db)):
+    return MarketScanner(db).top_losers(limit)
+
+
+@router.get("/most-volume")
+def most_volume(limit: int = Query(10, ge=1, le=100), db: Session = Depends(get_db)):
+    return MarketScanner(db).most_volume(limit)
+
+
+@router.get("/leaders")
+def leaders(limit: int = Query(10, ge=1, le=100), db: Session = Depends(get_db)):
+    return MarketScanner(db).leaders(limit)
+
+
+@router.get("/laggards")
+def laggards(limit: int = Query(10, ge=1, le=100), db: Session = Depends(get_db)):
+    return MarketScanner(db).laggards(limit)
+
+
+@router.get("/52-week-high")
+def week_52_high(limit: int = Query(10, ge=1, le=100), db: Session = Depends(get_db)):
+    return MarketScanner(db).near_52_week_high(limit)
+
+
+@router.get("/52-week-low")
+def week_52_low(limit: int = Query(10, ge=1, le=100), db: Session = Depends(get_db)):
+    return MarketScanner(db).near_52_week_low(limit)
 
 @router.get("/status", response_model=MarketStatusResponse)
 async def get_market_status(

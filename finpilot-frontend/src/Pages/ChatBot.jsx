@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Send, Sparkles, User, FileText, Search, Copy, RefreshCw, Plus, ChevronDown, X } from 'lucide-react';
+import { askFinPilot } from '../services/finpilotApi';
 
 const INITIAL_MESSAGES = [
   {
@@ -25,13 +26,6 @@ const CHAT_HISTORY = [
   { id: 4, title: 'Tesla 10-K Summary', date: 'Yesterday', active: false },
   { id: 5, title: 'Fed Rate Impact Analysis', date: 'Aug 25', active: false },
 ];
-
-const MOCK_RESPONSES = [
-  `Based on the latest earnings reports and market data, **NVIDIA's revenue increased 427% year-over-year** primarily due to massive demand for Hopper architecture GPUs (H100) from hyperscalers training generative AI models.\n\n**Key Drivers:**\n- Data Center revenue: $47.5B (up 427% YoY)\n- Gaming segment: $2.9B (modest recovery)\n- AI inference & training workloads driving demand\n\n**Forward Outlook:** Management guided for continued strong growth as AI infrastructure buildout accelerates globally. The Blackwell architecture (B100/B200) is expected to further expand their addressable market.`,
-  `Here's a comprehensive comparison of **Apple vs Microsoft** across key financial metrics:\n\n| Metric | Apple (AAPL) | Microsoft (MSFT) |\n|--------|------|------|\n| Revenue | $383B | $245B |\n| Gross Margin | 44.1% | 70.1% |\n| Operating Income | $115B | $109B |\n| P/E Ratio | 31x | 38x |\n| Dividend Yield | 0.5% | 0.7% |\n\n**Verdict:** Microsoft commands higher margins due to its software/cloud-heavy model. Apple benefits from its sticky ecosystem and strong free cash flow generation at $100B+ annually.`,
-];
-
-let responseIdx = 0;
 
 function formatMessage(text) {
   
@@ -84,7 +78,7 @@ export const ChatBot = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isTyping]);
 
-  const sendMessage = (text) => {
+  const sendMessage = async (text) => {
     if (!text.trim()) return;
 
     const userMessage = {
@@ -98,21 +92,27 @@ export const ChatBot = () => {
     setInput('');
     setIsTyping(true);
 
-    setTimeout(() => {
+    try {
+      const result = await askFinPilot(text);
       const aiMessage = {
         id: Date.now() + 1,
         role: 'assistant',
-        content: MOCK_RESPONSES[responseIdx % MOCK_RESPONSES.length],
-        citations: [
-          { title: 'NVDA Q4 2026 Earnings Release', type: 'SEC Filing' },
-          { title: 'Data Center Market Analysis', type: 'Market Data' },
-        ],
+        content: result.answer,
+        citations: [],
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
-      responseIdx++;
       setMessages(prev => [...prev, aiMessage]);
+    } catch (error) {
+      setMessages(prev => [...prev, {
+        id: Date.now() + 1,
+        role: 'assistant',
+        content: `I couldn't complete that request: ${error.message}`,
+        citations: [],
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      }]);
+    } finally {
       setIsTyping(false);
-    }, 1600);
+    }
   };
 
   const handleSend = (e) => {

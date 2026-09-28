@@ -227,11 +227,14 @@ The app is now available at **http://localhost:5173**
 | Research reports | ✅ Done |
 | Document management | ✅ Done |
 | Broker integration UI | ✅ Done |
-| Real market data API | 🔲 Planned |
-| OpenAI / Gemini AI integration | 🔲 Planned |
+| Real market data API | ✅ NSE seed + stock/scanner endpoints |
+| OpenAI Responses tool calling | ✅ Configurable via `OPENAI_API_KEY` |
+| Provider-neutral free-model tool calling | ✅ OpenRouter, Groq, Ollama-compatible |
+| Hybrid RAG with optional embeddings | ✅ Chunking, citations, lexical/vector ranking |
 | Broker API (Alpaca, IBKR) | 🔲 Planned |
-| PostgreSQL production DB | 🔲 Planned |
-| Docker deployment | 🔲 Planned |
+| PostgreSQL production DB | ✅ Docker Compose option |
+| Docker deployment | ✅ PostgreSQL + Redis services |
+| Production API container | ✅ Healthchecked FastAPI service |
 
 ---
 

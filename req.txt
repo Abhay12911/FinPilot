@@ -1,0 +1,4 @@
+DATABASE_URL=postgresql://postgress:postgres@localhost:5432/postgress
+
+command to start db and redis-
+docker compose up -d

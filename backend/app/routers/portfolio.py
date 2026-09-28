@@ -1,6 +1,5 @@
 import asyncio
 import datetime
-import random
 import logging
 from typing import List, Dict, Any
 
@@ -12,6 +11,8 @@ from app.auth import get_current_user
 from app.models.portfolio import Holding, WatchlistItem
 from app.models.research import Report, Document
 from app.services import market_service
+from app.services.portfolio_analytics import calculate_portfolio_analytics
+from app.services.stock_service import StockService
 
 logger = logging.getLogger(__name__)
 
@@ -120,24 +121,37 @@ async def get_portfolio_performance(
 ):
     user_id = current_user["id"]
     holdings = db.query(Holding).filter(Holding.user_id == user_id).all()
-    total_val = sum(h.shares * h.current_price for h in holdings)
-    if total_val == 0:
-        total_val = 128450.0
+    if not holdings:
+        return []
 
-    data = []
-    base_value = total_val * 0.92
-    now = datetime.datetime.utcnow()
-    # Seed based on user_id for reproducible curve
-    rng = random.Random(user_id)
-    
-    for i in range(30, -1, -1):
-        d = now - datetime.timedelta(days=i)
-        base_value += (rng.random() - 0.4) * (total_val * 0.01)
-        data.append({
-            "date": d.strftime("%b %d"),
-            "value": round(base_value, 2)
-        })
-    return data
+    service = StockService(db)
+    series_by_ticker = {}
+    for holding in holdings:
+        if service.find_stock(holding.ticker):
+            series_by_ticker[holding.ticker] = service.get_history(holding.ticker, 30)
+
+    points = []
+    for index in range(30):
+        value = 0.0
+        timestamp = None
+        for holding in holdings:
+            bars = series_by_ticker.get(holding.ticker, [])
+            if not bars:
+                value += holding.shares * holding.current_price
+                continue
+            bar = bars[index - len(bars)] if index >= len(bars) else bars[index]
+            value += holding.shares * bar["close"]
+            timestamp = bar["timestamp"]
+        points.append({"date": timestamp.strftime("%b %d") if timestamp else "unknown", "value": round(value, 2)})
+    return points
+
+
+@router.get("/analytics")
+def get_portfolio_analytics(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return calculate_portfolio_analytics(db, current_user["id"])
 
 @router.get("/holdings")
 async def get_portfolio_holdings(

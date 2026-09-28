@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Sparkles, CheckCircle2, Circle, Loader2, ChevronDown, ChevronRight, Download, Copy, Share2 } from 'lucide-react';
-import { runDeepResearch, addResearchReport } from '../services/research';
+import { runDeepResearch } from '../services/research';
 
 const RESEARCH_STEPS = [
   { id: 'company', label: 'Company information' },
@@ -19,19 +19,11 @@ const AGENTS = [
   { id: 'risk', name: 'Risk Agent', role: 'Evaluating company & market risks' },
 ];
 
-const MOCK_REPORT = {
-  executiveSummary: 'NVIDIA Corporation has established dominant market leadership in AI accelerator hardware through its CUDA ecosystem and Hopper GPU architecture. Revenue grew 122% YoY to $44.1B in FY2025, driven by insatiable demand from hyperscalers and enterprise AI deployments.',
-  financialAnalysis: 'Data Center segment revenues reached $30.8B, representing 70% of total revenue. Gross margins expanded to 76.0%, reflecting strong pricing power. Operating income surged to $23.7B with 54% operating margins.',
-  growthDrivers: ['Generative AI infrastructure buildout', 'Enterprise AI adoption acceleration', 'Sovereign AI government initiatives', 'Automotive & robotics AI expansion'],
-  risks: ['Export control restrictions on China sales', 'Custom silicon competition from hyperscalers', 'Cyclical semiconductor demand patterns', 'Valuation premium compression risk'],
-  conclusion: 'NVIDIA remains a strong long-term compounder, though near-term risk/reward depends on sustainability of AI capex spending by hyperscalers. Monitor export control developments closely.',
-};
-
 export const AIResearch = () => {
   const [stage, setStage] = useState('configure'); 
   const [config, setConfig] = useState({
-    company: 'NVIDIA Corporation',
-    ticker: 'NVDA',
+    company: 'Reliance Industries',
+    ticker: 'RELIANCE',
     objective: 'Comprehensive investment analysis',
     period: '5 Years',
     includeFinancials: true,
@@ -42,10 +34,21 @@ export const AIResearch = () => {
   const [steps, setSteps] = useState(RESEARCH_STEPS.map(s => ({ ...s, status: 'pending' })));
   const [agents, setAgents] = useState(AGENTS.map(a => ({ ...a, status: 'queued', progress: 0 })));
   const [expandedSection, setExpandedSection] = useState('executiveSummary');
+  const [researchResult, setResearchResult] = useState(null);
+  const [researchError, setResearchError] = useState('');
 
   const handleStartResearch = async () => {
     setStage('researching');
-    await runDeepResearch(config);
+    setResearchError('');
+    let result;
+    try {
+      result = await runDeepResearch(config);
+      setResearchResult(result);
+    } catch (error) {
+      setResearchError(error.message);
+      setStage('configure');
+      return;
+    }
 
     for (let i = 0; i < steps.length; i++) {
       await new Promise(r => setTimeout(r, 700));
@@ -65,31 +68,22 @@ export const AIResearch = () => {
     setSteps(prev => prev.map(s => ({ ...s, status: 'complete' })));
     setStage('report');
 
-    await addResearchReport({
-      id: 'rpt-' + Date.now(),
-      company: config.company || 'Generic Corp',
-      ticker: (config.ticker || 'GEN').toUpperCase(),
-      type: 'Deep Research',
-      date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-      riskLevel: 'Medium',
-      summary: `AI generated deep research report for ${config.company || 'Generic Corp'}.`,
-      sources: 30 + Math.floor(Math.random() * 20),
-      sections: 11
-    });
   };
 
+  const reportContent = researchResult?.content || 'No report content was returned.';
+
   const reportSections = [
-    { id: 'executiveSummary', label: 'Executive Summary', agent: 'Coordinator', content: MOCK_REPORT.executiveSummary },
-    { id: 'financialAnalysis', label: 'Financial Analysis', agent: 'Financial Agent', content: MOCK_REPORT.financialAnalysis },
+    { id: 'executiveSummary', label: 'Evidence-Grounded Answer', agent: 'Coordinator', content: reportContent },
+    { id: 'financialAnalysis', label: 'Financial Analysis', agent: 'Financial Agent', content: reportContent },
     {
       id: 'growthDrivers', label: 'Growth Drivers', agent: 'Financial Agent',
-      content: MOCK_REPORT.growthDrivers.map(d => `• ${d}`).join('\n')
+      content: reportContent
     },
     {
       id: 'risks', label: 'Risk Analysis', agent: 'Risk Agent',
-      content: MOCK_REPORT.risks.map(r => `• ${r}`).join('\n')
+      content: reportContent
     },
-    { id: 'conclusion', label: 'Conclusion', agent: 'Coordinator', content: MOCK_REPORT.conclusion },
+    { id: 'conclusion', label: 'Conclusion', agent: 'Coordinator', content: reportContent },
   ];
 
   return (
@@ -107,6 +101,7 @@ export const AIResearch = () => {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {}
           <div className="lg:col-span-2 rounded-xl border border-[#E5E5E5] bg-white p-6 shadow-sm space-y-5">
+            {researchError && <p className="rounded-lg border border-[#FFCDD2] bg-[#FEEBEE] px-3 py-2 text-[12px] text-[#C5221F]">{researchError}</p>}
             <h2 className="font-semibold text-[#050505]">Research Configuration</h2>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

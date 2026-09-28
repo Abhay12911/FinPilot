@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { SignalBadge } from '../components/ui/SignalBadge';
 import { SkeletonBlock, SkeletonCard, SkeletonChart } from '../components/ui/Skeleton';
+import { getQuote } from '../services/finpilotApi';
 
 const TIME_FILTERS = ['1D', '1W', '1M', '3M', '1Y', 'ALL'];
 
@@ -83,6 +84,7 @@ export const Overview = () => {
   const [summary, setSummary] = useState(null);
   const [performanceData, setPerformanceData] = useState([]);
   const [watchlist, setWatchlist] = useState([]);
+  const [marketQuotes, setMarketQuotes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeFilter, setActiveFilter] = useState('1M');
   const [aiQuery, setAiQuery] = useState('');
@@ -100,6 +102,8 @@ export const Overview = () => {
         setSummary(sum);
         setPerformanceData(perf);
         setWatchlist(watch);
+        const quotes = await Promise.allSettled(['RELIANCE', 'TCS', 'INFY'].map(getQuote));
+        setMarketQuotes(quotes.filter(result => result.status === 'fulfilled').map(result => result.value));
       } catch (error) {
         console.error('Failed to fetch dashboard data', error);
       } finally {
@@ -108,16 +112,6 @@ export const Overview = () => {
     };
     fetchData();
   }, []);
-
-  const generateSparkline = (isPositive) => {
-    const data = [];
-    let val = 100;
-    for (let i = 0; i < 20; i++) {
-      val += (Math.random() - (isPositive ? 0.35 : 0.65)) * 4;
-      data.push({ value: Math.max(80, val) });
-    }
-    return data;
-  };
 
   if (loading || !summary) {
     return (
@@ -151,7 +145,7 @@ export const Overview = () => {
 
   const enrichedWatchlist = watchlist.map(s => ({
     ...s,
-    sparkline: generateSparkline(s.changePercent >= 0),
+    sparkline: [],
   }));
 
   const userDisplayName = user?.name ? (user.name.includes('@') ? user.name.split('@')[0] : user.name) : 'User';
@@ -224,6 +218,29 @@ export const Overview = () => {
             }`}>{card.sub}</p>
           </div>
         ))}
+      </div>
+
+      <div className="bg-white rounded-xl border border-[#E5E5E5] p-5 shadow-xs">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <p className="font-mono text-[9px] text-[#8C8C8C] tracking-widest uppercase">LIVE MARKET DATA</p>
+            <h2 className="text-lg font-bold text-[#050505] mt-1">NSE snapshot</h2>
+          </div>
+          <span className="text-[11px] text-[#137333] font-semibold">Stored market feed</span>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {marketQuotes.map((quote) => (
+            <button key={quote.ticker} onClick={() => navigate(`/dashboard/companies/${quote.ticker}`)} className="text-left rounded-lg border border-[#F0F0F0] p-4 hover:border-[#050505] transition-colors">
+              <div className="flex items-center justify-between">
+                <span className="font-mono text-[11px] font-bold text-[#050505]">{quote.ticker}</span>
+                <span className={`text-[11px] font-semibold ${quote.change_percent >= 0 ? 'text-[#137333]' : 'text-[#C5221F]'}`}>{quote.change_percent >= 0 ? '+' : ''}{quote.change_percent.toFixed(2)}%</span>
+              </div>
+              <p className="text-xl font-bold text-[#050505] mt-2">₹{quote.price.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</p>
+              <p className="text-[10px] text-[#8C8C8C] mt-1">{new Date(quote.timestamp).toLocaleString()}</p>
+            </button>
+          ))}
+          {!marketQuotes.length && <p className="text-[12px] text-[#8C8C8C]">Market data is unavailable. Seed the backend market database.</p>}
+        </div>
       </div>
 
       {}
