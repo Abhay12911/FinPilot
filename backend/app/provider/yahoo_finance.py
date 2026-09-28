@@ -162,3 +162,5 @@ async def fetch_history(symbol: str, interval: str = "1day", outputsize: int = 1
     except Exception as exc:
         logger.error("Yahoo Finance history failed for %s: %s", symbol, exc)
         return []
+
+
