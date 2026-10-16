@@ -62,31 +62,47 @@ def _configured_model():
 
 
 def _serialize(value: Any) -> str:
-    return json.dumps(value, default=lambda item: item.isoformat() if isinstance(item, (datetime, date)) else str(item), ensure_ascii=False)
+    return json.dumps(value, default=_json_default, ensure_ascii=False)
+
+
+def _json_default(value: Any) -> str:
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    return str(value)
+
+
+def _resolve_symbol(db: Session, symbol_or_company: str) -> str:
+    from app.models.stock import Stock
+
+    value = symbol_or_company.strip()
+    upper_value = value.upper()
+    ticker_match = db.query(Stock).filter(
+        (Stock.ticker == upper_value) | (Stock.symbol == upper_value)
+    ).first()
+    if ticker_match:
+        return ticker_match.ticker
+
+    company_match = db.query(Stock).filter(Stock.company_name.ilike(f"%{value}%")).first()
+    return company_match.ticker if company_match else upper_value
+
+
+def _execute_market_operation(operation, symbol_or_company: str, *args):
+    # LangGraph can run sync tools in worker threads; each gets its own SQLAlchemy session.
+    with SessionLocal() as db:
+        symbol = _resolve_symbol(db, symbol_or_company)
+        try:
+            return operation(db, symbol, *args)
+        except (ValueError, LookupError) as error:
+            return {"error": str(error), "verified": False}
+        except Exception:
+            return {
+                "error": "The market data lookup failed; the requested value could not be verified.",
+                "verified": False,
+            }
 
 
 def _market_tools():
     from langchain.tools import tool
-    from app.models.stock import Stock
-
-    def execute(operation, symbol_or_company: str, *args):
-        # LangGraph can run sync tools in worker threads; each gets its own SQLAlchemy session.
-        with SessionLocal() as db:
-            value = symbol_or_company.strip()
-            ticker_match = db.query(Stock).filter(
-                (Stock.ticker == value.upper()) | (Stock.symbol == value.upper())
-            ).first()
-            if ticker_match:
-                value = ticker_match.ticker
-            else:
-                company_match = db.query(Stock).filter(Stock.company_name.ilike(f"%{value}%")).first()
-                value = company_match.ticker if company_match else value.upper()
-            try:
-                return operation(db, value, *args)
-            except (ValueError, LookupError) as error:
-                return {"error": str(error), "verified": False}
-            except Exception:
-                return {"error": "The market data lookup failed; the requested value could not be verified.", "verified": False}
 
     @tool
     def screen_indian_stock_movers(direction: str = "gainers", limit: int = 5, trading_date: str = "") -> str:
@@ -105,29 +121,94 @@ def _market_tools():
     @tool
     def get_stock_quote(symbol_or_company: str) -> str:
         """Get the latest price snapshot stored in FinPilot (not guaranteed live), its timestamp, daily change, and volume for a ticker or company name. Always report its timestamp and do not describe it as live unless that timestamp supports it."""
-        return _serialize(execute(market_tools.get_stock_quote, symbol_or_company))
+        return _serialize(_execute_market_operation(market_tools.get_stock_quote, symbol_or_company))
 
     @tool
     def get_stock_history(symbol_or_company: str, days: int = 20) -> str:
         """Get stored daily OHLCV history for a ticker or company, for 1 to 252 sessions."""
-        return _serialize(execute(market_tools.get_stock_history, symbol_or_company, days))
+        return _serialize(_execute_market_operation(market_tools.get_stock_history, symbol_or_company, days))
 
     @tool
     def get_52_week_data(symbol_or_company: str) -> str:
         """Get current price and calculated 52-week high and low for a ticker or company."""
-        return _serialize(execute(market_tools.get_52_week_data, symbol_or_company))
+        return _serialize(_execute_market_operation(market_tools.get_52_week_data, symbol_or_company))
 
     @tool
     def get_technical_indicators(symbol_or_company: str, period: int = 14) -> str:
         """Calculate RSI, moving averages, MACD, ATR, Bollinger Bands, and volume ratio for a ticker or company."""
-        return _serialize(execute(market_tools.get_technical_indicators, symbol_or_company, period))
+        return _serialize(_execute_market_operation(market_tools.get_technical_indicators, symbol_or_company, period))
 
     @tool
     def get_stock_move_attribution(symbol_or_company: str, window_days: int = 1) -> str:
         """Summarize measured price, volume, and volatility signals for a recent ticker or company move; signals do not prove its cause."""
-        return _serialize(execute(market_tools.get_stock_move_attribution, symbol_or_company, window_days))
+        return _serialize(_execute_market_operation(market_tools.get_stock_move_attribution, symbol_or_company, window_days))
 
     return [screen_indian_stock_movers, get_stock_quote, get_stock_history, get_52_week_data, get_technical_indicators, get_stock_move_attribution]
+
+
+def _conversation_messages(history: list[dict[str, str]] | None):
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    messages = []
+    for item in (history or [])[-12:]:
+        content = item.get("content")
+        if not content:
+            continue
+        if item.get("role") == "user":
+            messages.append(HumanMessage(content=content))
+        elif item.get("role") == "assistant":
+            messages.append(AIMessage(content=content))
+    return messages
+
+
+def _agent_system_prompt(current_symbol: str | None, evidence_context: str | None) -> str:
+    today = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
+    prompt = SYSTEM_PROMPT.format(today=today)
+    if current_symbol:
+        prompt += f" The user is viewing {current_symbol.strip().upper()}; resolve 'this stock' and similar references to it."
+    if evidence_context:
+        prompt += f"\nVerified evidence for this request: {evidence_context}"
+    return prompt
+
+
+def _message_text(content: Any) -> str:
+    if isinstance(content, list):
+        return "".join(part.get("text", "") for part in content if isinstance(part, dict))
+    return str(content or "The model returned an empty answer.")
+
+
+def _verified_market_ranking_answer(messages: list[Any], answer: str) -> str:
+    from langchain_core.messages import ToolMessage
+
+    for item in messages:
+        if not isinstance(item, ToolMessage) or item.name != "screen_indian_stock_movers":
+            continue
+        try:
+            payload = json.loads(item.content if isinstance(item.content, str) else "")
+            rows = payload.get("results")
+            if not isinstance(rows, list) or not rows:
+                return answer
+
+            answer_lower = answer.casefold()
+            missing_symbol = any(row["symbol"].casefold() not in answer_lower for row in rows)
+            changed_value = any(
+                f"{row['change_percent']:.2f}" not in answer
+                or f"{row['close']:,.2f}" not in answer
+                or f"{row['previous_close']:,.2f}" not in answer
+                or f"{abs(row['change']):,.2f}" not in answer
+                or (
+                    row["change_percent"] < 0
+                    and not any(
+                        mark + f"{abs(row['change_percent']):.2f}" in answer
+                        for mark in ("-", "−")
+                    )
+                )
+                for row in rows
+            )
+            return _format_market_ranking(payload) if missing_symbol or changed_value else answer
+        except (TypeError, ValueError, KeyError):
+            return answer
+    return answer
 
 
 async def ask_finpilot(
@@ -138,57 +219,22 @@ async def ask_finpilot(
     conversation_history: list[dict[str, str]] | None = None,
 ) -> str:
     from langchain.agents import create_agent
-    from langchain_core.messages import AIMessage, HumanMessage
 
     model = _configured_model()
-    history = [
-        HumanMessage(content=item["content"]) if item.get("role") == "user" else AIMessage(content=item["content"])
-        for item in (conversation_history or [])[-12:]
-        if item.get("role") in {"user", "assistant"} and item.get("content")
-    ]
-    symbol_context = f" The user is viewing {current_symbol.strip().upper()}; resolve 'this stock' and similar references to it." if current_symbol else ""
-    today = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
     agent = create_agent(
         model=model,
         tools=_market_tools(),
-        system_prompt=SYSTEM_PROMPT.format(today=today) + symbol_context + (f"\nVerified evidence for this request: {evidence_context}" if evidence_context else ""),
+        system_prompt=_agent_system_prompt(current_symbol, evidence_context),
     )
-    result = await agent.ainvoke({"messages": [*history, HumanMessage(content=message)]}, config={"recursion_limit": 10})
-    messages = result["messages"]
-    answer = messages[-1].content
-    if isinstance(answer, list):
-        answer = "".join(part.get("text", "") for part in answer if isinstance(part, dict))
-    answer = str(answer or "The model returned an empty answer.")
+    from langchain_core.messages import HumanMessage
 
-    # Check that a generated market ranking retained every result and its numeric
-    # percentage from the tool. If the model truncates or alters ranked evidence,
-    # fall back to a faithful presentation of that verified tool payload.
-    from langchain_core.messages import ToolMessage
-    for item in messages:
-        if not isinstance(item, ToolMessage) or item.name != "screen_indian_stock_movers":
-            continue
-        try:
-            payload = json.loads(item.content if isinstance(item.content, str) else "")
-            rows = payload.get("results")
-            if not isinstance(rows, list) or not rows:
-                continue
-            missing = any(row["symbol"].casefold() not in answer.casefold() for row in rows)
-            wrong_values = any(
-                f"{row['change_percent']:.2f}" not in answer
-                or f"{row['close']:,.2f}" not in answer
-                or f"{row['previous_close']:,.2f}" not in answer
-                or f"{abs(row['change']):,.2f}" not in answer
-                or (row["change_percent"] < 0 and not any(mark + f"{abs(row['change_percent']):.2f}" in answer for mark in ("-", "−")))
-                for row in rows
-            )
-            if missing or wrong_values:
-                answer = _format_market_ranking(payload)
-            break
-        except (TypeError, ValueError, KeyError):
-            # The system prompt instructs the model to surface malformed tool data
-            # as an inability to verify, rather than inventing a substitute answer.
-            break
-    return answer
+    result = await agent.ainvoke(
+        {"messages": [*_conversation_messages(conversation_history), HumanMessage(content=message)]},
+        config={"recursion_limit": 10},
+    )
+    messages = result["messages"]
+    answer = _message_text(messages[-1].content)
+    return _verified_market_ranking_answer(messages, answer)
 
 
 def _format_market_ranking(payload: dict[str, Any]) -> str:
@@ -225,26 +271,28 @@ async def answer_document_question(
     from langchain_core.prompts import ChatPromptTemplate
     from langchain_core.runnables import RunnableLambda, RunnablePassthrough
 
-    def format_history(items: list[dict[str, str]]) -> str:
-        return "\n".join(f"{item['role']}: {item['content']}" for item in items[-12:])
-
-    def format_passages(items: list[dict[str, Any]]) -> str:
-        return "\n\n".join(
-            f"[Source: {item['document']}, page {item['page'] or 'n/a'}, chunk {item['chunk'] + 1}]\n{item['text']}"
-            for item in items
-        )
-
     prompt = ChatPromptTemplate.from_messages([
         ("system", DOCUMENT_PROMPT),
         ("human", "Question: {question}"),
     ])
     chain = (
         RunnablePassthrough.assign(
-            history=RunnableLambda(lambda state: format_history(state["history"])),
-            context=RunnableLambda(lambda state: format_passages(state["passages"])),
+            history=RunnableLambda(lambda state: _format_history(state["history"])),
+            context=RunnableLambda(lambda state: _format_passages(state["passages"])),
         )
         | prompt
         | _configured_model()
         | StrOutputParser()
     )
     return await chain.ainvoke({"question": question, "history": conversation_history or [], "passages": passages})
+
+
+def _format_history(history: list[dict[str, str]]) -> str:
+    return "\n".join(f"{item['role']}: {item['content']}" for item in history[-12:])
+
+
+def _format_passages(passages: list[dict[str, Any]]) -> str:
+    return "\n\n".join(
+        f"[Source: {item['document']}, page {item['page'] or 'n/a'}, chunk {item['chunk'] + 1}]\n{item['text']}"
+        for item in passages
+    )
