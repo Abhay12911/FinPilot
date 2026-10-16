@@ -8,7 +8,6 @@ CASES = [
     ("What is the 52-week high?", "market_data"),
     ("Is RELIANCE overbought?", "technical_analysis"),
     ("Why did RELIANCE fall today?", "attribution"),
-    ("What did management say in the filing?", "documents"),
 ]
 
 

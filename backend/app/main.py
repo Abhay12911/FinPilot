@@ -5,30 +5,23 @@ from app.database import engine, Base
 
 # Import all models to ensure they are created in the SQLite database
 from app.models.user import User
-from app.models.portfolio import Holding, WatchlistItem
-from app.models.research import Report, Document, DocumentChunk
-from app.models.news import NewsArticle
 from app.models.market import MarketCache, MarketQuote
 from app.models.stock import Stock, PriceBar
+from app.models.research import Document, DocumentChunk
+from app.models.conversation import ChatConversation, ChatMessage, ChatConversationDocument
 
 # Import routers
 from app.auth import router as auth_router
-from app.routers.portfolio import router as portfolio_router
-from app.routers.companies import router as companies_router
-from app.routers.research import router as research_router
 from app.api.v1.market import router as market_router
-from app.api.v1.news import router as news_router
-from app.routers.stocks import router as stocks_router
 from app.routers.chat import router as chat_router
 from app.routers.ai import router as ai_router
-from app.routers.streaming import router as streaming_router
 from app.observability import request_context
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
 
 
-def _ensure_document_columns():
+def _ensure_chat_document_columns():
     additions = {
         "documents": {
             "mime_type": "VARCHAR(120)",
@@ -37,6 +30,7 @@ def _ensure_document_columns():
             "error": "TEXT",
         },
         "document_chunks": {
+            "page": "INTEGER",
             "character_count": "INTEGER DEFAULT 0",
             "embedding": "TEXT",
         },
@@ -50,7 +44,8 @@ def _ensure_document_columns():
                     connection.execute(text(f'ALTER TABLE "{table}" ADD COLUMN "{column}" {definition}'))
 
 
-_ensure_document_columns()
+_ensure_chat_document_columns()
+
 
 # Initialize FastAPI App
 app = FastAPI(
@@ -76,15 +71,9 @@ app.middleware("http")(request_context)
 
 # Register routers
 app.include_router(auth_router)
-app.include_router(portfolio_router)
-app.include_router(companies_router)
-app.include_router(research_router)
 app.include_router(market_router)
-app.include_router(news_router)
-app.include_router(stocks_router)
 app.include_router(chat_router)
 app.include_router(ai_router)
-app.include_router(streaming_router)
 
 @app.get("/")
 def root():

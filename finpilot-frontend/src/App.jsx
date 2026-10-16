@@ -9,20 +9,9 @@ import DashboardLayout from './Pages/DashboardLayout';
 import LandingPage from './Pages/LandingPage';
 import LoginPage from './Pages/LoginPage';
 import SignupPage from './Pages/SignupPage';
-import Overview from './Pages/Overview';
 import MarketOverview from './Pages/MarketOverview';
-import MarketSignals from './Pages/MarketSignals';
-import CompanyWorkspace from './Pages/CompanyWorkspace';
 import ChatBot from './Pages/ChatBot';
-import Compare from './Pages/Compare';
 import AIResearch from './Pages/AIResearch';
-import Portfolio from './Pages/Portfolio';
-import Watchlist from './Pages/Watchlist';
-import PersonalAnalyzer from './Pages/PersonalAnalyzer';
-import MarketNews from './Pages/MarketNews';
-import Documents from './Pages/Documents';
-import Reports from './Pages/Reports';
-import BrokerIntegration from './Pages/BrokerIntegration';
 
 export default function App() {
   const { scrollYProgress } = useScroll();
@@ -46,21 +35,11 @@ export default function App() {
             {/* Protected dashboard routes */}
             <Route element={<ProtectedRoute />}>
               <Route path="/dashboard" element={<DashboardLayout />}>
-                <Route index element={<Overview />} />
+                <Route index element={<Navigate to="market-overview" replace />} />
                 <Route path="market-overview" element={<MarketOverview />} />
-                <Route path="market-signals" element={<MarketSignals />} />
-                <Route path="companies" element={<CompanyWorkspace />} />
-                <Route path="companies/:ticker" element={<CompanyWorkspace />} />
-                <Route path="research" element={<ChatBot />} />
-                <Route path="compare" element={<Compare />} />
+                <Route path="chat" element={<ChatBot />} />
                 <Route path="ai-research" element={<AIResearch />} />
-                <Route path="portfolio" element={<Portfolio />} />
-                <Route path="watchlist" element={<Watchlist />} />
-                <Route path="personal-analyzer" element={<PersonalAnalyzer />} />
-                <Route path="market-news" element={<MarketNews />} />
-                <Route path="documents" element={<Documents />} />
-                <Route path="reports" element={<Reports />} />
-                <Route path="brokers" element={<BrokerIntegration />} />
+                <Route path="*" element={<Navigate to="/dashboard/market-overview" replace />} />
               </Route>
             </Route>
 

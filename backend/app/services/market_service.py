@@ -77,8 +77,16 @@ def _get_cache_value(db: Session, key: str, ttl_minutes: int) -> Optional[Any]:
         return cached
     cached = db.query(MarketCache).filter(MarketCache.key == key).first()
     if cached:
-        cutoff = datetime.utcnow() - timedelta(minutes=ttl_minutes)
-        if cached.updated_at >= cutoff:
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=ttl_minutes)
+        updated_at = cached.updated_at
+        # Some database drivers return TIMESTAMP values without tzinfo even
+        # when the column is declared timezone-aware. Treat those as UTC so
+        # they can be compared safely with the UTC cutoff.
+        if updated_at.tzinfo is None:
+            updated_at = updated_at.replace(tzinfo=timezone.utc)
+        else:
+            updated_at = updated_at.astimezone(timezone.utc)
+        if updated_at >= cutoff:
             try:
                 return json.loads(cached.value)
             except Exception:

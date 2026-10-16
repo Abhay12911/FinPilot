@@ -1,12 +1,11 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   BarChart, Bar, Cell
 } from 'recharts';
 import {
   Globe, Search, RefreshCw, ArrowUpRight, ArrowDownRight, TrendingUp, TrendingDown,
-  Activity, DollarSign, BarChart2, ShieldAlert, Award, ExternalLink
+  Activity, DollarSign, BarChart2, ShieldAlert, Award
 } from 'lucide-react';
 import {
   getMarketStatus, getMarketIndices, getMarketMovers, getSectorPerformance,
@@ -51,7 +50,6 @@ const CustomTooltip = ({ active, payload, label }) => {
 };
 
 export const MarketOverview = () => {
-  const navigate = useNavigate();
 
   const [loadingStatus, setLoadingStatus] = useState(true);
   const [loadingIndices, setLoadingIndices] = useState(true);
@@ -144,7 +142,7 @@ export const MarketOverview = () => {
   const fetchHistoryData = useCallback(async (symbolName, timeframe) => {
     try {
       setLoadingHistory(true);
-      const symbol = SYMBOL_KEY_MAP[symbolName] || 'SPX';
+      const symbol = SYMBOL_KEY_MAP[symbolName] || symbolName;
 
       let outputsize = 30;
       if (timeframe === '1D') outputsize = 24;
@@ -328,13 +326,11 @@ export const MarketOverview = () => {
                             onClick={() => {
                               setSearchQuery('');
                               setSearchResults(null);
-                              if (item.type === 'equity') {
-                                navigate(`/dashboard/companies/${item.symbol}`);
-                              } else {
-                                const matchedIndex = Object.keys(SYMBOL_KEY_MAP).find(k => SYMBOL_KEY_MAP[k] === item.symbol);
-                                if (matchedIndex) {
-                                  setChartIndex(matchedIndex);
-                                }
+                              const matchedIndex = Object.keys(SYMBOL_KEY_MAP).find(k => SYMBOL_KEY_MAP[k] === item.symbol);
+                              if (matchedIndex) {
+                                setChartIndex(matchedIndex);
+                              } else if (item.type === 'equity') {
+                                setChartIndex(item.symbol);
                               }
                             }}
                             className="flex items-center justify-between p-2 rounded-lg hover:bg-[#F5F5F5] cursor-pointer transition-colors"
@@ -578,6 +574,9 @@ export const MarketOverview = () => {
                 onChange={(e) => setChartIndex(e.target.value)}
                 className="bg-white border border-[#E5E5E5] text-[11.5px] py-1.5 px-3 rounded-lg outline-none cursor-pointer focus-ring"
               >
+                {!Object.prototype.hasOwnProperty.call(SYMBOL_KEY_MAP, chartIndex) && (
+                  <option value={chartIndex}>{chartIndex}</option>
+                )}
                 <optgroup label="India">
                   <option value="NIFTY 50">Nifty 50</option>
                   <option value="BANK NIFTY">Bank Nifty</option>
@@ -739,11 +738,10 @@ export const MarketOverview = () => {
                     {movers.gainers.map((stock) => (
                       <tr
                         key={stock.symbol}
-                        onClick={() => navigate(`/dashboard/companies/${stock.symbol}`)}
-                        className="border-b border-[#F5F5F5] hover:bg-[#FAFAFA] cursor-pointer last:border-0"
+                        className="border-b border-[#F5F5F5] hover:bg-[#FAFAFA] last:border-0"
                       >
                         <td className="py-2.5 font-bold text-[#050505] flex items-center gap-1.5">
-                          {stock.symbol} <ExternalLink size={10} className="text-[#ADADAD]" />
+                          {stock.symbol}
                         </td>
                         <td className="py-2.5 text-[#595959]">${stock.price.toFixed(2)}</td>
                         <td className="py-2.5 text-[#137333] font-bold text-right">+{stock.change_percent.toFixed(2)}%</td>
@@ -770,11 +768,10 @@ export const MarketOverview = () => {
                     {movers.losers.map((stock) => (
                       <tr
                         key={stock.symbol}
-                        onClick={() => navigate(`/dashboard/companies/${stock.symbol}`)}
-                        className="border-b border-[#F5F5F5] hover:bg-[#FAFAFA] cursor-pointer last:border-0"
+                        className="border-b border-[#F5F5F5] hover:bg-[#FAFAFA] last:border-0"
                       >
                         <td className="py-2.5 font-bold text-[#050505] flex items-center gap-1.5">
-                          {stock.symbol} <ExternalLink size={10} className="text-[#ADADAD]" />
+                          {stock.symbol}
                         </td>
                         <td className="py-2.5 text-[#595959]">${stock.price.toFixed(2)}</td>
                         <td className="py-2.5 text-[#C5221F] font-bold text-right">{stock.change_percent.toFixed(2)}%</td>
