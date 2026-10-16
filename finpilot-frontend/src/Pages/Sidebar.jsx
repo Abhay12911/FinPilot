@@ -1,50 +1,18 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
-  LayoutDashboard, LineChart, Activity, Briefcase, BarChart2, Sparkles,
-  Bookmark, Newspaper, FileText, Terminal, Settings, HelpCircle,
-  LogOut, Zap, Link2, X, ChevronLeft, ChevronRight
+  Activity, Sparkles, MessageSquare,
+  LogOut, Zap, X, ChevronLeft, ChevronRight
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { SettingsModal } from '../components/ui/SettingsModal';
-import { HelpModal } from '../components/ui/HelpModal';
 
 const NAV_GROUPS = [
   {
-    title: 'OVERVIEW',
+    title: 'FOCUS',
     items: [
-      { name: 'Dashboard', path: '/dashboard', icon: LayoutDashboard, end: true },
-      { name: 'Market Overview', path: '/dashboard/market-overview', icon: Activity },
-    ]
-  },
-  {
-    title: 'RESEARCH',
-    items: [
-      { name: 'Research', path: '/dashboard/research', icon: BarChart2 },
-      { name: 'Companies', path: '/dashboard/companies', icon: Briefcase },
-      { name: 'Compare', path: '/dashboard/compare', icon: LineChart },
+      { name: 'Market Dashboard', path: '/dashboard/market-overview', icon: Activity },
+      { name: 'AI Chat', path: '/dashboard/chat', icon: MessageSquare },
       { name: 'AI Research', path: '/dashboard/ai-research', icon: Sparkles },
-    ]
-  },
-  {
-    title: 'PORTFOLIO',
-    items: [
-      { name: 'Portfolio', path: '/dashboard/portfolio', icon: LineChart },
-      { name: 'Watchlist', path: '/dashboard/watchlist', icon: Bookmark },
-      { name: 'Personal Analyzer', path: '/dashboard/personal-analyzer', icon: Activity },
-    ]
-  },
-  {
-    title: 'INTELLIGENCE',
-    items: [
-      { name: 'Market News', path: '/dashboard/market-news', icon: Newspaper },
-      { name: 'Documents', path: '/dashboard/documents', icon: FileText },
-    ]
-  },
-  {
-    title: 'REPORTS',
-    items: [
-      { name: 'My Reports', path: '/dashboard/reports', icon: Terminal },
     ]
   }
 ];
@@ -52,8 +20,6 @@ const NAV_GROUPS = [
 export const Sidebar = ({ open = false, onClose = () => { }, collapsed = false, onToggleCollapse = () => { } }) => {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [helpOpen, setHelpOpen] = useState(false);
 
   const handleLogout = () => {
     logout();
@@ -174,58 +140,6 @@ export const Sidebar = ({ open = false, onClose = () => { }, collapsed = false, 
 
         {}
         <div className="px-3 py-3 border-t border-[#E5E5E5] space-y-0.5 bg-white">
-          <NavLink
-            to="/dashboard/brokers"
-            onClick={onClose}
-            className={({ isActive }) =>
-              `group relative flex items-center rounded-lg text-[13px] font-semibold transition-all ${
-                collapsed ? 'justify-center p-2' : 'px-3 py-2 gap-3'
-              } ${isActive ? 'bg-[#F5F5F5] text-[#050505]' : 'text-[#595959] hover:bg-[#FAFAFA] hover:text-[#050505]'}`
-            }
-          >
-            {({ isActive }) => (
-              <>
-                <Link2 size={15} strokeWidth={2} className={isActive ? 'text-[#050505]' : 'text-[#8C8C8C] group-hover:text-[#050505]'} />
-                {!collapsed && <span>Broker Connect</span>}
-                {collapsed && (
-                  <div className="absolute left-[80px] bg-[#050505] text-white text-[11px] font-semibold px-2 py-1 rounded shadow-md pointer-events-none opacity-0 translate-x-[-8px] group-hover:opacity-100 group-hover:translate-x-0 transition-all z-50 whitespace-nowrap">
-                    Broker Connect
-                  </div>
-                )}
-              </>
-            )}
-          </NavLink>
-
-          <button
-            className={`group relative w-full flex items-center rounded-lg text-[13px] font-semibold text-[#595959] hover:bg-[#FAFAFA] hover:text-[#050505] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#050505] ${
-              collapsed ? 'justify-center p-2' : 'px-3 py-2 gap-3'
-            }`}
-            onClick={() => setSettingsOpen(true)}
-          >
-            <Settings size={15} strokeWidth={2} className="text-[#8C8C8C] group-hover:text-[#050505]" />
-            {!collapsed && <span>Settings</span>}
-            {collapsed && (
-              <div className="absolute left-[80px] bg-[#050505] text-white text-[11px] font-semibold px-2 py-1 rounded shadow-md pointer-events-none opacity-0 translate-x-[-8px] group-hover:opacity-100 group-hover:translate-x-0 transition-all z-50 whitespace-nowrap">
-                Settings
-              </div>
-            )}
-          </button>
-
-          <button
-            className={`group relative w-full flex items-center rounded-lg text-[13px] font-semibold text-[#595959] hover:bg-[#FAFAFA] hover:text-[#050505] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#050505] ${
-              collapsed ? 'justify-center p-2' : 'px-3 py-2 gap-3'
-            }`}
-            onClick={() => setHelpOpen(true)}
-          >
-            <HelpCircle size={15} strokeWidth={2} className="text-[#8C8C8C] group-hover:text-[#050505]" />
-            {!collapsed && <span>Help & Support</span>}
-            {collapsed && (
-              <div className="absolute left-[80px] bg-[#050505] text-white text-[11px] font-semibold px-2 py-1 rounded shadow-md pointer-events-none opacity-0 translate-x-[-8px] group-hover:opacity-100 group-hover:translate-x-0 transition-all z-50 whitespace-nowrap">
-                Help & Support
-              </div>
-            )}
-          </button>
-
           {}
           <div className={`pt-3 mt-3 border-t border-[#E5E5E5] flex items-center justify-between ${collapsed ? 'px-0 justify-center' : 'px-1'}`}>
             {!collapsed ? (
@@ -261,8 +175,6 @@ export const Sidebar = ({ open = false, onClose = () => { }, collapsed = false, 
         </div>
       </aside>
       {}
-      <SettingsModal isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
-      <HelpModal isOpen={helpOpen} onClose={() => setHelpOpen(false)} />
     </>
   );
 };

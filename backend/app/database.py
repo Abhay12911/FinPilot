@@ -6,7 +6,6 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite:///./finpilot.db"
     SECRET_KEY: str = "CHANGE_THIS_TO_A_RANDOM_SECRET_KEY"
-    ALPHA_VANTAGE_KEY: str = ""
     TWELVE_DATA_KEY: str = "demo"
     REDIS_URL: str = "redis://localhost:6379"
     # Optional: market APIs continue to work when no AI key is configured.

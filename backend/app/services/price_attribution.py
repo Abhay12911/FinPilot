@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
 from math import sqrt
 
-from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
-from app.models.news import NewsArticle
 from app.services.stock_service import StockService
 
 
@@ -42,15 +39,6 @@ def get_price_move_attribution(db: Session, symbol: str, window_days: int = 1) -
             daily_returns.append((current["close"] - previous["close"]) / previous["close"] * 100)
     volatility = _standard_deviation(daily_returns)
 
-    published_after = latest["timestamp"] - timedelta(days=2)
-    articles = (
-        db.query(NewsArticle)
-        .filter(NewsArticle.ticker.ilike(f"%{stock.ticker}%"))
-        .filter(NewsArticle.published_at >= published_after)
-        .order_by(desc(NewsArticle.published_at))
-        .limit(10)
-        .all()
-    )
     evidence = [
         {
             "type": "price",
@@ -74,18 +62,6 @@ def get_price_move_attribution(db: Session, symbol: str, window_days: int = 1) -
             "confidence": "measured",
         },
     ]
-    evidence.extend(
-        {
-            "type": "news",
-            "source_id": article.id,
-            "title": article.title,
-            "source": article.source,
-            "published_at": article.published_at.isoformat() if isinstance(article.published_at, datetime) else article.published_at,
-            "sentiment": article.overall_sentiment_label,
-            "confidence": "correlation_only",
-        }
-        for article in articles
-    )
     return {
         "ticker": stock.ticker,
         "symbol": stock.symbol,
@@ -93,5 +69,5 @@ def get_price_move_attribution(db: Session, symbol: str, window_days: int = 1) -
         "window_days": window_days,
         "move": {"close": latest["close"], "return_percent": round(return_pct, 4)},
         "evidence": evidence,
-        "disclaimer": "Evidence is descriptive and correlational; it does not establish why the price moved.",
+        "disclaimer": "The measured price and volume signals are descriptive and do not establish why the price moved.",
     }
