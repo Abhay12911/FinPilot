@@ -25,3 +25,5 @@ The API listens on `http://localhost:8000`. Interactive endpoint documentation i
 - `GET /health/live`, `GET /health/ready`: service health.
 
 The AI service uses stored and fetched market data for its evidence. When no LLM API key is configured, it returns a deterministic answer from that evidence.
+
+The market dashboard refreshes its REST API data every 30 minutes rather than streaming real-time price changes.

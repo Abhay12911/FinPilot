@@ -3,12 +3,13 @@ import json
 import httpx
 from datetime import datetime, timedelta, time, timezone
 from typing import Optional, List, Dict, Any
+from zoneinfo import ZoneInfo
 from sqlalchemy.orm import Session
 from app.database import settings
 from app.models.market import MarketCache, MarketQuote
 from app.provider import twelve_data
 from app.provider import yahoo_finance
-from app.services import cache
+from app.provider import nse_market
 
 
 logger = logging.getLogger(__name__)
@@ -20,6 +21,22 @@ STATUS_CACHE_TTL_MINUTES = 15  # Cache status for 15 minutes
 # Curated lists of popular equities for movers if API fails or lacks mover endpoints
 POPULAR_US_STOCKS = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "NFLX", "AMD", "INTC"]
 POPULAR_IN_STOCKS = ["RELIANCE:NSE", "TCS:NSE", "HDFCBANK:NSE", "ICICIBANK:NSE", "INFY:NSE", "BHARTIARTL:NSE", "ITC:NSE", "SBIN:NSE", "LTIM:NSE", "TATAMOTORS:NSE"]
+
+INDIA_INDEX_NAMES = {
+    "NIFTY50": "NIFTY 50", "BANKNIFTY": "NIFTY BANK", "SENSEX": "SENSEX",
+    "NIFTYNEXT50": "NIFTY NEXT 50", "NIFTY100": "NIFTY 100", "NIFTY200": "NIFTY 200",
+    "NIFTY500": "NIFTY 500", "MIDCAP50": "NIFTY MIDCAP 50", "MIDCAP100": "NIFTY MIDCAP 100",
+    "MIDCAP150": "NIFTY MIDCAP 150", "SMALLCAP100": "NIFTY SMALLCAP 100",
+    "MIDSMALL400": "NIFTY MIDSMALLCAP 400",
+}
+
+INDIA_SECTOR_INDICES = [
+    ("Auto", "NIFTYAUTO"), ("Bank", "BANKNIFTY"), ("Financial Services", "NIFTYFINANCIAL"),
+    ("FMCG", "NIFTYFMCG"), ("IT", "NIFTYIT"), ("Media", "NIFTYMEDIA"),
+    ("Metal", "NIFTYMETAL"), ("Pharma", "NIFTYPHARMA"), ("PSU Bank", "NIFTYPSUBANK"),
+    ("Private Bank", "NIFTYPVTBANK"), ("Realty", "NIFTYREALTY"), ("Energy", "NIFTYENERGY"),
+    ("Infrastructure", "NIFTYINFRA"),
+]
 
 # Fallback values for Indices, Forex, and Commodities
 FALLBACK_INDEX_QUOTES = {
@@ -72,9 +89,6 @@ def _is_us_daylight_saving(now_utc: datetime) -> bool:
 
 # --- General Key-Value Cache Helpers ---
 def _get_cache_value(db: Session, key: str, ttl_minutes: int) -> Optional[Any]:
-    cached = cache.get_json(key)
-    if cached is not None:
-        return cached
     cached = db.query(MarketCache).filter(MarketCache.key == key).first()
     if cached:
         cutoff = datetime.now(timezone.utc) - timedelta(minutes=ttl_minutes)
@@ -93,8 +107,7 @@ def _get_cache_value(db: Session, key: str, ttl_minutes: int) -> Optional[Any]:
                 pass
     return None
 
-def _set_cache_value(db: Session, key: str, value: Any):
-    cache.set_json(key, value, CACHE_TTL_MINUTES * 60)
+def _set_cache_value(db: Session, key: str, value: Any, ttl_minutes: int = CACHE_TTL_MINUTES):
     try:
         cached = db.query(MarketCache).filter(MarketCache.key == key).first()
         val_str = json.dumps(value)
@@ -247,9 +260,9 @@ async def get_market_status(db: Session, force: bool = False) -> Dict[str, Any]:
         elif "post" in status or "after" in status:
             normalized = "after_hours"
             
-        if code in ["XNSE", "XBOM"]:
+        if code in ["XNSE", "XBOM"] and india_status != "open":
             india_status = normalized
-        elif code in ["XNYS", "XNAS"]:
+        elif code in ["XNYS", "XNAS"] and usa_status != "open":
             usa_status = normalized
             
     response = {
@@ -272,7 +285,7 @@ async def get_indices(db: Session, force: bool = False) -> Dict[str, List[Dict[s
     """Fetch indices for India, USA, and Global sections."""
     # List of indices to fetch
     targets = {
-        "india": [("NIFTY50", "index"), ("BANKNIFTY", "index"), ("SENSEX", "index")],
+        "india": [(symbol, "index") for symbol in INDIA_INDEX_NAMES],
         "usa": [("SPX", "index"), ("COMP", "index"), ("DJI", "index")],
         "global_markets": [("VIX", "index"), ("USDINR", "forex"), ("EURUSD", "forex"), ("GOLD", "commodity"), ("CRUDE", "commodity")]
     }
@@ -310,7 +323,7 @@ async def get_indices(db: Session, force: bool = False) -> Dict[str, List[Dict[s
             td_sym = twelve_data.get_td_symbol(sym)
             q = yahoo_quotes.get(sym) or twelve_quotes.get(td_sym)
             # Find item mapping details
-            market = "India" if sym in ["NIFTY50", "BANKNIFTY", "SENSEX"] else ("USA" if sym in ["SPX", "COMP", "DJI"] else "Global")
+            market = "India" if sym in INDIA_INDEX_NAMES else ("USA" if sym in ["SPX", "COMP", "DJI"] else "Global")
             asset_type = "index"
             for s, items in targets.items():
                 for s_name, a_type in items:
@@ -329,6 +342,9 @@ async def get_indices(db: Session, force: bool = False) -> Dict[str, List[Dict[s
                 else:
                     # Final mock fallback
                     fb = FALLBACK_INDEX_QUOTES.get(sym, {})
+                    if not fb:
+                        logger.warning("No live, stale, or fallback quote is available for index %s", sym)
+                        continue
                     batch_data[sym] = MarketQuote(
                         symbol=sym,
                         name=fb.get("name", sym),
@@ -349,7 +365,7 @@ async def get_indices(db: Session, force: bool = False) -> Dict[str, List[Dict[s
             if q:
                 result[section].append({
                     "symbol": q.symbol,
-                    "name": q.name,
+                    "name": INDIA_INDEX_NAMES.get(sym, q.name),
                     "value": q.price or 0.0,
                     "change": q.change or 0.0,
                     "change_percent": (q.change_percent * 100.0) if q.change_percent else 0.0,
@@ -359,6 +375,8 @@ async def get_indices(db: Session, force: bool = False) -> Dict[str, List[Dict[s
                 })
                 
     return result
+
+
 
 async def get_quote(db: Session, symbol: str) -> Optional[MarketQuote]:
     """Fetch single stock/asset quote with db caching.
@@ -374,7 +392,7 @@ async def get_quote(db: Session, symbol: str) -> Optional[MarketQuote]:
         return cached
 
     sym_upper = symbol.upper()
-    market = "India" if sym_upper in ["NIFTY50", "BANKNIFTY", "SENSEX"] else "USA"
+    market = "India" if sym_upper in INDIA_INDEX_NAMES else "USA"
     asset_type = "equity"
     if "/" in symbol or sym_upper in ["EURUSD", "USDINR", "GBPUSD", "USDJPY"]:
         asset_type = "forex"
@@ -480,10 +498,25 @@ async def get_movers(db: Session, market: str, force: bool = False) -> Dict[str,
 async def get_sectors(db: Session, market: str, force: bool = False) -> List[Dict[str, Any]]:
     """Return sector performances for the market (US / India)."""
     api_key = _get_api_key()
-    cache_key = f"sectors_{market.lower()}"
+    cache_key = f"sectors_v2_{market.lower()}"
     cached = None if force else _get_cache_value(db, cache_key, CACHE_TTL_MINUTES)
     if cached:
         return cached
+
+    if market.lower() == "india":
+        quotes = await yahoo_finance.fetch_batch_quotes([symbol for _, symbol in INDIA_SECTOR_INDICES])
+        response = []
+        for sector, symbol in INDIA_SECTOR_INDICES:
+            quote = quotes.get(symbol)
+            if quote and quote.get("price") is not None:
+                response.append({
+                    "sector": sector,
+                    "change_percent": float(quote.get("percent_change", 0.0)),
+                    "market": "india",
+                    "timestamp": datetime.utcnow(),
+                })
+        _set_cache_value(db, cache_key, response)
+        return response
         
     response = []
     
@@ -545,15 +578,34 @@ async def get_sectors(db: Session, market: str, force: bool = False) -> List[Dic
     _set_cache_value(db, cache_key, response)
     return response
 
+
+def get_market_strength(db: Session) -> Dict[str, Any]:
+    """Calculate daily NSE EQ breadth and top sector participation from NSE Indices constituents."""
+    today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
+    start_date = today - timedelta(days=10)
+    cache_key = f"market_strength_nse_v4_{today.isoformat()}"
+    cached = _get_cache_value(db, cache_key, 30)
+    if cached:
+        return cached
+
+    breadth = nse_market.fetch_market_breadth_history(start_date, today)
+    response = {"market": breadth["market"], "sectors": breadth["sectors"],
+                "coverage": breadth["coverage"], "source": breadth["source"],
+                "latest_market_date": breadth["latest_market_date"],
+                "sector_coverage": breadth["sector_coverage"]}
+    _set_cache_value(db, cache_key, response, ttl_minutes=30)
+    return response
+
 async def get_history(
     db: Session, 
     symbol: str, 
     interval: str = "1day", 
-    outputsize: int = 100
+    outputsize: int = 100,
+    force: bool = False
 ) -> List[Dict[str, Any]]:
     """Fetch historical OHLCV data for an asset with local key-value caching."""
     cache_key = f"history_{symbol}_{interval}_{outputsize}"
-    cached = _get_cache_value(db, cache_key, HISTORY_CACHE_TTL_MINUTES)
+    cached = None if force else _get_cache_value(db, cache_key, HISTORY_CACHE_TTL_MINUTES)
     if cached:
         return cached
         
@@ -742,10 +794,8 @@ async def get_market_signals(db: Session) -> List[Dict[str, Any]]:
     signals = []
     now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
     
-    # Process all indices from USA, India, and Global
-    all_items = []
-    for key in ["india", "usa", "global_markets"]:
-        all_items.extend(indices_data.get(key, []))
+    # The dashboard's signals are scoped to Indian market indices.
+    all_items = indices_data.get("india", [])
         
     for item in all_items:
         val = item["value"]
@@ -798,4 +848,4 @@ async def get_market_signals(db: Session) -> List[Dict[str, Any]]:
             
     # Sort signals by strength desc
     signals.sort(key=lambda x: x["strength"], reverse=True)
-    return signals[:6]
+    return signals

@@ -12,16 +12,16 @@ from app.models.stock import PriceBar, Stock
 from app.provider.market_provider import YahooFinanceProvider
 
 UNIVERSE = [
-    {"ticker": "RELIANCE", "symbol": "RELIANCE.NS", "name": "Reliance Industries"},
-    {"ticker": "TCS", "symbol": "TCS.NS", "name": "Tata Consultancy Services"},
-    {"ticker": "INFY", "symbol": "INFY.NS", "name": "Infosys"},
-    {"ticker": "HDFCBANK", "symbol": "HDFCBANK.NS", "name": "HDFC Bank"},
-    {"ticker": "ICICIBANK", "symbol": "ICICIBANK.NS", "name": "ICICI Bank"},
-    {"ticker": "SBIN", "symbol": "SBIN.NS", "name": "State Bank of India"},
-    {"ticker": "ITC", "symbol": "ITC.NS", "name": "ITC"},
-    {"ticker": "LT", "symbol": "LT.NS", "name": "Larsen & Toubro"},
-    {"ticker": "BHARTIARTL", "symbol": "BHARTIARTL.NS", "name": "Bharti Airtel"},
-    {"ticker": "AXISBANK", "symbol": "AXISBANK.NS", "name": "Axis Bank"},
+    {"ticker": "RELIANCE", "symbol": "RELIANCE.NS", "name": "Reliance Industries", "sector": "Energy"},
+    {"ticker": "TCS", "symbol": "TCS.NS", "name": "Tata Consultancy Services", "sector": "IT"},
+    {"ticker": "INFY", "symbol": "INFY.NS", "name": "Infosys", "sector": "IT"},
+    {"ticker": "HDFCBANK", "symbol": "HDFCBANK.NS", "name": "HDFC Bank", "sector": "Private Bank"},
+    {"ticker": "ICICIBANK", "symbol": "ICICIBANK.NS", "name": "ICICI Bank", "sector": "Private Bank"},
+    {"ticker": "SBIN", "symbol": "SBIN.NS", "name": "State Bank of India", "sector": "PSU Bank"},
+    {"ticker": "ITC", "symbol": "ITC.NS", "name": "ITC", "sector": "FMCG"},
+    {"ticker": "LT", "symbol": "LT.NS", "name": "Larsen & Toubro", "sector": "Infrastructure"},
+    {"ticker": "BHARTIARTL", "symbol": "BHARTIARTL.NS", "name": "Bharti Airtel", "sector": "Telecom"},
+    {"ticker": "AXISBANK", "symbol": "AXISBANK.NS", "name": "Axis Bank", "sector": "Private Bank"},
 ]
 
 
@@ -32,9 +32,11 @@ async def seed() -> None:
         for item in UNIVERSE:
             stock = db.query(Stock).filter(Stock.ticker == item["ticker"]).one_or_none()
             if stock is None:
-                stock = Stock(ticker=item["ticker"], symbol=item["symbol"], company_name=item["name"], exchange="NSE")
+                stock = Stock(ticker=item["ticker"], symbol=item["symbol"], company_name=item["name"], exchange="NSE", sector=item["sector"])
                 db.add(stock)
                 db.flush()
+            else:
+                stock.sector = item["sector"]
 
             history = await provider.get_history(stock.symbol, period="1y", interval="1d")
             if not history:

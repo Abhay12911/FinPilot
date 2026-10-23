@@ -41,6 +41,8 @@ async def get_indices(
     """Retrieve major indices for India, US, and Global sections."""
     return await market_service.get_indices(db, force=force)
 
+
+
 @router.get("/quote/{symbol}", response_model=MarketQuoteOut)
 async def get_quote(
     symbol: str,
@@ -74,11 +76,17 @@ async def get_sectors(
         raise HTTPException(status_code=400, detail="Market parameter must be 'india' or 'usa'")
     return await market_service.get_sectors(db, market, force=force)
 
+@router.get("/strength")
+def get_market_strength(db: Session = Depends(get_db)):
+    """Return recent 21-day market breadth and sector breadth/volume participation."""
+    return market_service.get_market_strength(db)
+
 @router.get("/history/{symbol}", response_model=List[HistoricalPoint])
 async def get_history(
     symbol: str,
     interval: str = Query("1day", description="Supported intervals: 1min, 5min, 15min, 30min, 1h, 1day, 1week"),
     outputsize: int = Query(100, ge=1, le=500, description="Number of historical data points to retrieve"),
+    force: bool = Query(False, description="Bypass the history cache"),
     db: Session = Depends(get_db)
 ):
     """Retrieve historical daily/intraday OHLCV details for a symbol."""
@@ -88,7 +96,7 @@ async def get_history(
             status_code=400, 
             detail=f"Interval '{interval}' is not supported. Choose from {valid_intervals}"
         )
-    return await market_service.get_history(db, symbol, interval, outputsize)
+    return await market_service.get_history(db, symbol, interval, outputsize, force=force)
 
 @router.get("/search", response_model=MarketSearchResponse)
 async def get_search(

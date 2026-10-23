@@ -4,7 +4,7 @@ FinPilot is focused on three product areas: AI Chat, AI Research, and a live mar
 
 ## Run locally
 
-Start the API and its PostgreSQL/Redis dependencies:
+Start the API and its PostgreSQL dependency:
 
 ```bash
 docker compose up --build

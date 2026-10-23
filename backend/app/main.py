@@ -62,6 +62,8 @@ app.add_middleware(
         "http://127.0.0.1:5173",
         "http://localhost:5174",
         "http://127.0.0.1:5174",
+        "http://localhost:4173",
+        "http://127.0.0.1:4173",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -90,7 +92,7 @@ def liveness():
 
 @app.get("/health/ready", tags=["health"])
 def readiness():
-    checks = {"database": "ok", "redis": "optional"}
+    checks = {"database": "ok"}
     try:
         with engine.connect() as connection:
             connection.execute(text("SELECT 1"))

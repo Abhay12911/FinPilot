@@ -7,4 +7,4 @@ npm install
 npm run dev
 ```
 
-Set `VITE_API_URL` if the API is hosted somewhere other than `http://127.0.0.1:8000`.
+During local Vite development, the chat client uses the same-origin `/api/v1` path and Vite proxies it to `http://127.0.0.1:8000`. Set `VITE_API_URL` to the API host (for example, `https://api.example.com`) for a separately hosted API; the chat client adds `/api/v1` automatically, and an URL that already ends with `/api/v1` is also supported.

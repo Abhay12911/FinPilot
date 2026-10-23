@@ -8,6 +8,7 @@ import re
 from typing import Any
 from functools import lru_cache
 
+import httpx
 from sqlalchemy.orm import Session
 
 from app.database import settings
@@ -18,6 +19,63 @@ CHUNK_SIZE = 1_000
 CHUNK_OVERLAP = 150
 
 
+class HuggingFaceRouterEmbeddings:
+    """Embeddings through the Hugging Face Inference Providers router."""
+
+    def __init__(self, model: str, api_key: str, api_url: str):
+        self.model = model
+        self.api_key = api_key
+        self.url = f"{api_url.rstrip('/')}/{model}"
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        if not texts:
+            return []
+        response = httpx.post(
+            self.url,
+            headers={"Authorization": f"Bearer {self.api_key}"},
+            json={"inputs": texts, "options": {"wait_for_model": True}},
+            timeout=90.0,
+        )
+        if response.is_error:
+            # Preserve the useful provider response, but never include request headers.
+            detail = response.text[:500]
+            raise RuntimeError(f"Hugging Face embedding request failed ({response.status_code}): {detail}")
+        try:
+            vectors = response.json()
+        except ValueError as error:
+            raise RuntimeError("Hugging Face returned an invalid embedding response") from error
+        if isinstance(vectors, dict) and vectors.get("error"):
+            raise RuntimeError(f"Hugging Face embedding request failed: {str(vectors['error'])[:500]}")
+        if not isinstance(vectors, list):
+            raise RuntimeError("Hugging Face returned an unexpected embedding response")
+
+        # Feature-extraction models can return one vector per input or token-level
+        # vectors. Mean-pool token vectors so PGVector receives one vector per text.
+        if len(texts) == 1 and vectors and isinstance(vectors[0], (int, float)):
+            vectors = [vectors]
+        elif len(vectors) == len(texts) and vectors and isinstance(vectors[0], list):
+            pass
+        elif len(texts) == 1 and vectors and isinstance(vectors[0], list):
+            vectors = [vectors]
+        else:
+            raise RuntimeError("Hugging Face returned a different number of embeddings than requested")
+
+        output: list[list[float]] = []
+        for vector in vectors:
+            if vector and isinstance(vector[0], list):
+                dimensions = len(vector[0])
+                if not dimensions or any(len(token) != dimensions for token in vector):
+                    raise RuntimeError("Hugging Face returned inconsistent token embedding dimensions")
+                vector = [sum(float(token[i]) for token in vector) / len(vector) for i in range(dimensions)]
+            if not vector or not all(isinstance(value, (int, float)) for value in vector):
+                raise RuntimeError("Hugging Face returned an invalid embedding vector")
+            output.append([float(value) for value in vector])
+        return output
+
+    def embed_query(self, text: str) -> list[float]:
+        return self.embed_documents([text])[0]
+
+
 @lru_cache(maxsize=1)
 def _langchain_components():
     from langchain_core.documents import Document as LCDocument
@@ -26,14 +84,15 @@ def _langchain_components():
 
     provider = (settings.EMBEDDING_PROVIDER or "openai_compatible").strip().lower()
     if provider == "huggingface":
-        from langchain_huggingface import HuggingFaceEndpointEmbeddings
-
         if not settings.HF_API_KEY:
-            raise ValueError("HF_API_KEY is required for document embeddings")
-        embeddings = HuggingFaceEndpointEmbeddings(
-            model=settings.HF_EMBEDDING_MODEL,
-            task="feature-extraction",
-            huggingfacehub_api_token=settings.HF_API_KEY,
+            raise ValueError("HF_API_KEY is required for Hugging Face document embeddings. Create a token with Inference Providers permission.")
+        model = settings.HF_EMBEDDING_MODEL.strip()
+        if not model:
+            raise ValueError("HF_EMBEDDING_MODEL must be set to a Hugging Face feature-extraction model")
+        embeddings = HuggingFaceRouterEmbeddings(
+            model=model,
+            api_key=settings.HF_API_KEY,
+            api_url=settings.HF_EMBEDDING_URL,
         )
     else:
         from langchain_openai import OpenAIEmbeddings
@@ -191,6 +250,11 @@ def delete_document_vectors(document_id: int, chunk_count: int) -> None:
         return
     _, vector_store, _ = _langchain_components()
     vector_store.delete(ids=_vector_ids(document_id, chunk_count))
+
+
+def delete_indexed_document(document: Document, chunk_count: int) -> None:
+    """Remove a document's vectors before its relational rows are deleted."""
+    delete_document_vectors(document.id, chunk_count)
 
 
 def checksum(raw: bytes) -> str:
