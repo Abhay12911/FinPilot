@@ -86,6 +86,20 @@ def _resolve_symbol(db: Session, symbol_or_company: str) -> str:
     return company_match.ticker if company_match else upper_value
 
 
+def _resolve_quote_symbol(db: Session, symbol_or_company: str) -> str:
+    """Keep exchange suffixes from the stock master for provider quote lookups."""
+    from app.models.stock import Stock
+
+    value = symbol_or_company.strip()
+    upper_value = value.upper()
+    stock = db.query(Stock).filter(
+        (Stock.ticker == upper_value) | (Stock.symbol == upper_value)
+    ).first()
+    if stock is None:
+        stock = db.query(Stock).filter(Stock.company_name.ilike(f"%{value}%")).first()
+    return stock.symbol if stock else upper_value
+
+
 def _execute_market_operation(operation, symbol_or_company: str, *args):
     # LangGraph can run sync tools in worker threads; each gets its own SQLAlchemy session.
     with SessionLocal() as db:
@@ -119,9 +133,31 @@ def _market_tools():
             return _serialize({"error": "NSE market data could not be retrieved; do not infer or fabricate a ranking.", "verified": False})
 
     @tool
-    def get_stock_quote(symbol_or_company: str) -> str:
-        """Get the latest price snapshot stored in FinPilot (not guaranteed live), its timestamp, daily change, and volume for a ticker or company name. Always report its timestamp and do not describe it as live unless that timestamp supports it."""
-        return _serialize(_execute_market_operation(market_tools.get_stock_quote, symbol_or_company))
+    async def get_stock_quote(symbol_or_company: str) -> str:
+        """Get the latest provider-backed quote for any supported ticker or company name, including US stocks such as AAPL. Resolve company names through Yahoo Finance, then report quote timestamp and currency. Do not restrict this tool to Indian listings."""
+        from app.provider import yahoo_finance
+        from app.services import market_service
+
+        with SessionLocal() as quote_db:
+            symbol = _resolve_quote_symbol(quote_db, symbol_or_company)
+            quote = await market_service.get_quote(quote_db, symbol)
+            if quote is None or not quote.price:
+                matches = await yahoo_finance.search_symbols(symbol_or_company, include_global=True)
+                if matches:
+                    quote = await market_service.get_quote(quote_db, matches[0].get("symbol", ""))
+            if quote is None or not quote.price:
+                return _serialize({"error": f"No verified quote was available for {symbol_or_company}.", "verified": False})
+            return _serialize({
+                "symbol": quote.symbol,
+                "name": quote.name,
+                "price": quote.price,
+                "currency": quote.currency,
+                "change": quote.change,
+                "change_percent": (quote.change_percent or 0.0) * 100,
+                "exchange": quote.exchange,
+                "timestamp": quote.timestamp,
+                "verified": True,
+            })
 
     @tool
     def get_stock_history(symbol_or_company: str, days: int = 20) -> str:
@@ -164,6 +200,7 @@ def _conversation_messages(history: list[dict[str, str]] | None):
 def _agent_system_prompt(current_symbol: str | None, evidence_context: str | None) -> str:
     today = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
     prompt = SYSTEM_PROMPT.format(today=today)
+    prompt += " For every request asking for a share, stock, or ticker price, call get_stock_quote first. This quote tool supports Indian and international listings; do not tell the user that a stock must be NSE-listed unless they specifically ask about NSE eligibility or NSE rankings."
     if current_symbol:
         prompt += f" The user is viewing {current_symbol.strip().upper()}; resolve 'this stock' and similar references to it."
     if evidence_context:
