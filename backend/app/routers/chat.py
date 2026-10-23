@@ -16,7 +16,7 @@ from app.auth import get_current_user
 from app.database import get_db, settings
 from app.models.conversation import ChatConversation, ChatMessage, ChatConversationDocument
 from app.models.research import Document, DocumentChunk
-from app.services.rag import checksum, delete_document_vectors, index_document, retrieve_documents
+from app.services.rag import checksum, delete_indexed_document, index_document, retrieve_documents
 
 router = APIRouter(prefix="/api/v1/chat", tags=["Chat"])
 MAX_DOCUMENT_BYTES = 10 * 1024 * 1024
@@ -84,7 +84,7 @@ def delete_conversation(conversation_id: int, current_user: dict = Depends(get_c
 @router.get("/documents")
 def list_documents(current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
     rows = db.query(Document).filter(Document.user_id == current_user["id"]).order_by(Document.uploaded_at.desc(), Document.id.desc()).all()
-    return [{"id": row.id, "name": row.name, "size": row.size, "mime_type": row.mime_type, "status": row.status, "error": row.error, "uploaded_at": row.uploaded_at.isoformat(), "chunks": db.query(DocumentChunk).filter(DocumentChunk.document_id == row.id).count()} for row in rows]
+    return [{"id": row.id, "name": row.name, "size": row.size, "mime_type": row.mime_type, "status": row.status, "error": row.error, "provider": "huggingface" if row.status == "Indexed" else None, "uploaded_at": row.uploaded_at.isoformat(), "chunks": db.query(DocumentChunk).filter(DocumentChunk.document_id == row.id).count()} for row in rows]
 
 
 @router.post("/documents", status_code=status.HTTP_201_CREATED)
@@ -100,10 +100,20 @@ async def upload_document(file: UploadFile = File(...), current_user: dict = Dep
     digest = checksum(raw)
     duplicate = db.query(Document).filter(Document.user_id == current_user["id"], Document.checksum == digest).first()
     if duplicate:
-        return {"id": duplicate.id, "name": duplicate.name, "size": duplicate.size, "status": duplicate.status, "chunks": db.query(DocumentChunk).filter(DocumentChunk.document_id == duplicate.id).count(), "duplicate": True}
-    document = Document(user_id=current_user["id"], name=name[:255], size=str(len(raw)), mime_type=file.content_type, checksum=digest, status="Processing")
-    db.add(document)
-    db.flush()
+        if duplicate.status != "Failed":
+            return {"id": duplicate.id, "name": duplicate.name, "size": duplicate.size, "status": duplicate.status, "chunks": db.query(DocumentChunk).filter(DocumentChunk.document_id == duplicate.id).count(), "duplicate": True}
+        document = duplicate
+        document.name = name[:255]
+        document.size = str(len(raw))
+        document.mime_type = file.content_type
+        document.status = "Processing"
+        document.error = None
+    else:
+        document = Document(user_id=current_user["id"], name=name[:255], size=str(len(raw)), mime_type=file.content_type, checksum=digest, status="Processing")
+        db.add(document)
+        db.flush()
+    # Keep the upload record even if embedding or vector indexing fails.
+    db.commit()
     try:
         chunk_count = await index_document(db, document, raw)
     except ValueError as error:
@@ -111,8 +121,22 @@ async def upload_document(file: UploadFile = File(...), current_user: dict = Dep
         document.error = str(error)
         db.commit()
         raise HTTPException(status_code=415, detail=str(error)) from error
+    except Exception as error:
+        # Embedding and vector storage can fail with exceptions other than
+        # ValueError. Preserve the
+        # failure on the document and return a useful API response instead of
+        # leaving the client with an unhandled 500.
+        db.rollback()
+        document = db.query(Document).filter(
+            Document.user_id == current_user["id"], Document.checksum == digest
+        ).first()
+        if document is not None:
+            document.status = "Failed"
+            document.error = str(error)
+            db.commit()
+        raise HTTPException(status_code=502, detail=f"Document indexing failed: {error}") from error
     db.refresh(document)
-    return {"id": document.id, "name": document.name, "size": document.size, "status": document.status, "chunks": chunk_count, "duplicate": False}
+    return {"id": document.id, "name": document.name, "size": document.size, "status": document.status, "chunks": chunk_count, "provider": "huggingface", "duplicate": False}
 
 
 @router.delete("/documents/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -121,7 +145,7 @@ def delete_document(document_id: int, current_user: dict = Depends(get_current_u
     if document is None:
         raise HTTPException(status_code=404, detail="Document not found")
     chunk_count = db.query(DocumentChunk).filter(DocumentChunk.document_id == document.id).count()
-    delete_document_vectors(document.id, chunk_count)
+    delete_indexed_document(document, chunk_count)
     db.query(DocumentChunk).filter(DocumentChunk.document_id == document.id).delete(synchronize_session=False)
     db.query(ChatConversationDocument).filter(ChatConversationDocument.document_id == document.id).delete(synchronize_session=False)
     db.delete(document)

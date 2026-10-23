@@ -41,8 +41,10 @@ export const getSectorPerformance = (market, force = false) => {
   return apiRequest(`/api/v1/market/sectors?market=${market}${force ? '&force=true' : ''}`);
 };
 
-export const getMarketHistory = (symbol, interval = '1day', outputsize = 100) => {
-  return apiRequest(`/api/v1/market/history/${symbol}?interval=${interval}&outputsize=${outputsize}`);
+export const getMarketStrength = () => apiRequest('/api/v1/market/strength');
+
+export const getMarketHistory = (symbol, interval = '1day', outputsize = 100, force = false) => {
+  return apiRequest(`/api/v1/market/history/${symbol}?interval=${interval}&outputsize=${outputsize}${force ? '&force=true' : ''}`);
 };
 
 export const searchMarket = (query) => {
@@ -66,6 +68,7 @@ export default {
   getMarketIndices,
   getMarketMovers,
   getSectorPerformance,
+  getMarketStrength,
   getMarketHistory,
   searchMarket,
   getForex,

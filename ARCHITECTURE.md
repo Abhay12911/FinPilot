@@ -21,7 +21,6 @@ flowchart LR
     API --> Auth[JWT authentication]
     API --> Services[Domain services]
     Services --> PG[(PostgreSQL + pgvector)]
-    Services --> Redis[(Redis optional cache)]
     Services --> Twelve[Twelve Data]
     Services --> Yahoo[Yahoo Finance]
     Services --> Alpha[Alpha Vantage news]
@@ -37,7 +36,7 @@ flowchart LR
 | API | `backend/app/` | FastAPI routes, authentication, orchestration, providers, services |
 | Database | Docker PostgreSQL | Users, portfolios, stocks, price bars, quotes, cache, reports, documents, news |
 | Vector database / vector store | PostgreSQL with the `pgvector` extension, provided by the `pgvector/pgvector:pg17` image | Stores and searches document embeddings through LangChain PGVector |
-| Cache | Docker Redis | Short-lived JSON market-response cache; optional and best effort |
+| Cache | PostgreSQL | Market-response cache with endpoint-specific TTLs |
 | LLM | Groq through OpenAI SDK | Natural-language synthesis using `openai/gpt-oss-20b` in the current environment |
 | Market quote/history provider | Twelve Data | Dashboard indices, quotes, history, market status, movers-related data, search |
 | Indian equity discovery/history provider | Yahoo Finance | Dynamic NSE/BSE company lookup and on-demand historical bars |
@@ -58,7 +57,6 @@ The first command starts or rebuilds:
 
 - `api` on `http://localhost:8000`
 - `postgres` on port `5432`
-- `redis` on port `6379`
 
 The seed command loads the initial NSE universe and approximately one year of Yahoo daily bars for the stocks listed in `backend/scripts/seed_market.py`.
 
@@ -81,10 +79,9 @@ Configuration is loaded by `backend/app/database.py` using Pydantic Settings and
 | Variable | Current purpose |
 |---|---|
 | `DATABASE_URL` | PostgreSQL connection in Docker; SQLite is the default fallback for local development |
-| `REDIS_URL` | Redis connection used by the short-lived cache |
 | `SECRET_KEY` | JWT signing secret; it must be kept private and changed outside development |
 
-Docker overrides the database and Redis connection strings so the API connects to the service names `postgres` and `redis` inside the compose network.
+Docker overrides the database connection string so the API connects to `postgres` inside the compose network.
 
 ### Market-data keys
 
@@ -151,26 +148,19 @@ sequenceDiagram
     participant UI as Overview/Market pages
     participant API as FastAPI market route
     participant S as market_service
-    participant R as Redis
     participant DB as PostgreSQL
     participant TD as Twelve Data
     participant YF as Yahoo Finance
 
     UI->>API: GET /api/v1/market/indices or quote/history
     API->>S: Resolve requested market data
-    S->>R: Read short-lived JSON cache
-    alt Redis hit
-        R-->>S: Cached response
-    else Cache miss
-        S->>DB: Read recent MarketQuote/MarketCache
-        alt Fresh database value
-            DB-->>S: Cached quote/history
-        else Provider request
-            S->>TD: Request quote, history, status, or search
-            TD-->>S: Provider response
-            S->>DB: Persist MarketQuote/MarketCache
-            S->>R: Store short-lived response
-        end
+    S->>DB: Read recent MarketQuote/MarketCache
+    alt Fresh database value
+        DB-->>S: Cached quote/history
+    else Provider request
+        S->>TD: Request quote, history, status, or search
+        TD-->>S: Provider response
+        S->>DB: Persist MarketQuote/MarketCache
     end
     S-->>API: Normalized response
     API-->>UI: JSON response
@@ -198,8 +188,7 @@ It provides:
 
 There are two cache layers:
 
-1. **Redis:** `backend/app/services/cache.py` stores JSON under the `finpilot:` prefix using TTLs. Redis failures are ignored so the API can continue.
-2. **PostgreSQL:** `MarketCache` stores serialized JSON, and `MarketQuote` stores normalized quote fields. PostgreSQL is used as a fallback when Redis is unavailable and for persistence between API processes.
+1. **PostgreSQL:** `MarketCache` stores serialized JSON, and `MarketQuote` stores normalized quote fields. PostgreSQL provides the market-response cache and persistence between API processes.
 
 Configured service TTLs include:
 
@@ -522,7 +511,6 @@ The frontend API base URL is read from `VITE_API_URL`; otherwise it defaults to 
 
 FinPilot is designed to continue operating when optional providers fail:
 
-- Redis failure falls back to PostgreSQL or a fresh provider request.
 - Twelve Data failure can use stored values or defined fallback values.
 - Yahoo search/history failure leaves the user with a deterministic no-data message rather than an empty response.
 - Groq/LLM failure falls back to deterministic evidence formatting.
@@ -584,7 +572,7 @@ npm run build
 For live dashboard cards, start at:
 
 ```text
-frontend page -> frontend market service -> /api/v1/market/* -> market_service.py -> Twelve Data/Redis/PostgreSQL/fallback
+frontend page -> frontend market service -> /api/v1/market/* -> market_service.py -> Twelve Data/PostgreSQL/fallback
 ```
 
 For chat:
@@ -620,12 +608,9 @@ When `docker compose up -d --build` is executed:
 5. Python dependencies are installed with `pip`.
 6. `backend/app` and `backend/scripts` are copied into `/app`.
 7. PostgreSQL starts from `pgvector/pgvector:pg17`.
-8. Redis starts from `redis:7-alpine`.
 9. PostgreSQL must pass `pg_isready -U finpilot -d finpilot` before the API is started.
-10. Redis must answer `PING` before the API is started.
 11. Compose injects the Docker-internal values:
     - `DATABASE_URL=postgresql://finpilot:postgres@postgres:5432/finpilot`
-    - `REDIS_URL=redis://redis:6379`
 12. Uvicorn starts `app.main:app` on `0.0.0.0:8000`.
 13. FastAPI imports all models before table creation.
 14. SQLAlchemy creates missing tables.
@@ -678,14 +663,13 @@ For `GET /api/v1/market/history/{symbol}`:
 1. The interval is checked against `1min`, `5min`, `15min`, `30min`, `1h`, `1day`, and `1week`.
 2. The requested output size is constrained by the API schema.
 3. A key-value cache key is built from symbol, interval, and output size.
-4. Redis is checked first.
 5. PostgreSQL `MarketCache` is checked second for a value newer than 60 minutes.
 6. Yahoo Finance is requested first.
 7. Twelve Data is tried if Yahoo returns no rows and a key is configured.
 8. Each row is parsed into a timestamp, open, high, low, close, and integer volume.
 9. Invalid rows are skipped rather than failing the complete response.
 10. Rows are sorted chronologically.
-11. The response is written to Redis and PostgreSQL.
+11. The response is written to PostgreSQL.
 12. If both providers return no rows, the service generates deterministic fallback history for supported fallback assets using a seeded random generator. This is synthetic data and must not be presented as provider data.
 
 ### 20.4 Chat execution
@@ -942,8 +926,7 @@ FinPilot uses both terms for different layers of the same implementation:
   chunk metadata, status, and indexing information.
 
 Therefore, the concrete vector database is PostgreSQL plus pgvector, while `PGVector` is the
-application/library vector-store interface used to write and search that database. Redis is
-not the vector store; it is an optional short-lived cache for market responses.
+application/library vector-store interface used to write and search that database.
 
 The current PGVector implementation requires a PostgreSQL connection. The SQLite fallback is
 not sufficient for the current chat document vector-search path.
@@ -964,7 +947,7 @@ For the specific chat question "top NSE gainers/movers," the LLM must call
 stored application quote table. The NSE provider filters to regular `EQ` series stocks and
 returns its trading date and source URL with the ranking.
 
-The dashboard first checks Redis and PostgreSQL caches where configured. If no usable cached
+The dashboard first checks PostgreSQL caches where configured. If no usable cached
 value exists, it calls the relevant external provider and persists normalized results. Fallback
 or stale values are not equivalent to live provider data and should be labeled accordingly.
 
@@ -1132,8 +1115,7 @@ it as live.
 Many dashboard requests check cached data before contacting an external provider:
 
 ```text
-Redis cache
-  -> fresh PostgreSQL MarketCache or MarketQuote
+fresh PostgreSQL MarketCache or MarketQuote
   -> external provider
   -> stale PostgreSQL value
   -> predefined or synthetic fallback where that feature supports one

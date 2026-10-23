@@ -1,16 +1,39 @@
 import { getToken } from './api';
 
-const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000/api/v1";
+const configuredApiUrl = (import.meta.env.VITE_API_URL || '/api/v1').replace(/\/+$/, '');
+const API_URL = configuredApiUrl.startsWith('/')
+  ? configuredApiUrl
+  : configuredApiUrl.endsWith('/api/v1')
+  ? configuredApiUrl
+  : `${configuredApiUrl}/api/v1`;
 
 async function request(path, options = {}) {
   const token = getToken();
   const headers = new Headers(options.headers || {});
   if (token) headers.set('Authorization', `Bearer ${token}`);
-  const response = await fetch(`${API_URL}${path}`, { ...options, headers });
+  let response;
+  try {
+    response = await fetch(`${API_URL}${path}`, { ...options, headers });
+  } catch (error) {
+    throw new Error(
+      `Cannot connect to FinPilot API at ${API_URL}. Check that the backend is running and VITE_API_URL is correct.`,
+      { cause: error },
+    );
+  }
   if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
-    const detail = body.detail;
-    throw new Error(typeof detail === 'string' ? detail : detail ? JSON.stringify(detail) : "FinPilot request failed");
+    const responseText = await response.text();
+    let detail = responseText;
+    try {
+      const body = responseText ? JSON.parse(responseText) : {};
+      detail = body.detail;
+    } catch {
+      detail = responseText;
+    }
+    throw new Error(
+      typeof detail === 'string' && detail.trim()
+        ? detail
+        : `FinPilot request failed (${response.status} ${response.statusText})`,
+    );
   }
   if (response.status === 204) return null;
   return response.json();

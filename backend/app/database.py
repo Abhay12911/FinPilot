@@ -7,10 +7,9 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite:///./finpilot.db"
     SECRET_KEY: str = "CHANGE_THIS_TO_A_RANDOM_SECRET_KEY"
     TWELVE_DATA_KEY: str = "demo"
-    REDIS_URL: str = "redis://localhost:6379"
     # Optional: market APIs continue to work when no AI key is configured.
     OPENAI_API_KEY: str = ""
-    OPENAI_MODEL: str = "gpt-5-mini"
+    OPENAI_MODEL: str = "gpt-4.1-mini"
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
     LLM_PROVIDER: str = "openai"
     LLM_API_KEY: str = ""
