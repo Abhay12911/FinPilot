@@ -207,9 +207,9 @@ Configured service TTLs include:
 
 It normalizes FinPilot symbols such as `NIFTY50`, `BANKNIFTY`, `SENSEX`, `SPX`, `COMP`, `DJI`, `USDINR`, `GOLD`, and `CRUDE` to Twelve Data symbols.
 
-### Fallback values
+### Provider failure behavior
 
-`market_service.py` contains defined fallback values for common indices, currencies, and commodities. These values allow screens to remain populated when a provider is unavailable, but they are fallback/demo values and must not be interpreted as a fresh provider quote.
+Market prices, movers, sectors, and history are returned only when available from a provider or a fresh database cache. When providers cannot verify data, the affected dashboard section is empty rather than populated with sample or synthetic prices.
 
 For stored-stock scanners, `MarketScanner` calculates metrics from PostgreSQL `PriceBar` rows rather than calling an external API for every ranking request.
 
@@ -511,8 +511,8 @@ The frontend API base URL is read from `VITE_API_URL`; otherwise it defaults to 
 
 FinPilot is designed to continue operating when optional providers fail:
 
-- Twelve Data failure can use stored values or defined fallback values.
-- Yahoo search/history failure leaves the user with a deterministic no-data message rather than an empty response.
+- Twelve Data failure falls back to Yahoo Finance where supported; otherwise the affected market data is unavailable.
+- Yahoo search/history failure returns no market data rather than a sample value.
 - Groq/LLM failure falls back to deterministic evidence formatting.
 - Missing embeddings fall back to lexical document retrieval.
 - Alpha Vantage rate limits return cached/empty news rather than breaking the market page.
@@ -559,7 +559,7 @@ npm run build
 ## 18. Important implementation limitations
 
 1. The seeded market scanner only ranks stocks with enough stored daily bars. Dynamically discovered stocks become available to research after Yahoo history is loaded, but they are not automatically part of every precomputed mover list until enough local bars exist.
-2. The dashboard's fallback index values are defined application values and may be stale when providers are unavailable.
+2. Dashboard values are sourced from providers or short-lived database caches. A section can be empty when its provider is unavailable.
 3. Yahoo Finance is used without a key and can change response behavior or rate-limit requests.
 4. Alpha Vantage free-tier quotas can limit news freshness.
 5. The current WebSocket market-depth provider returns an empty order book because no broker feed is configured.
@@ -650,11 +650,10 @@ For `GET /api/v1/market/quote/{symbol}`:
 6. A successful Yahoo quote is normalized and saved to `MarketQuote`.
 7. If Yahoo fails and a Twelve Data key exists, Twelve Data `/quote` is called.
 8. A successful Twelve Data response is normalized and saved.
-9. If both providers fail, an old `MarketQuote` is returned if one exists.
-10. If no old quote exists, the endpoint returns `404`.
+9. If both providers fail, the endpoint returns `404` rather than a stale quote.
 11. The database session is closed after the request.
 
-The indices endpoint follows a similar path but first checks all requested symbols, fetches missing symbols in a Yahoo batch, then uses a Twelve Data batch for anything Yahoo did not return. If both providers fail, it checks stale database rows and finally uses the predefined fallback index values.
+The indices endpoint follows a similar path but first checks fresh quote rows, fetches missing symbols in a Yahoo batch, then uses a Twelve Data batch for anything Yahoo did not return. If both providers fail, the affected index is omitted.
 
 ### 20.3 Overview history execution
 
@@ -670,7 +669,7 @@ For `GET /api/v1/market/history/{symbol}`:
 9. Invalid rows are skipped rather than failing the complete response.
 10. Rows are sorted chronologically.
 11. The response is written to PostgreSQL.
-12. If both providers return no rows, the service generates deterministic fallback history for supported fallback assets using a seeded random generator. This is synthetic data and must not be presented as provider data.
+12. If both providers return no rows, the response is empty; the service does not generate synthetic history.
 
 ### 20.4 Chat execution
 
@@ -1041,8 +1040,8 @@ Twelve Data is used primarily for dashboard-oriented market data:
 - A fallback for historical data when Yahoo Finance returns no usable history.
 
 The dashboard movers feature uses a limited popular-symbol list; it is not a complete
-scan of every NSE-listed stock. If Twelve Data returns no usable mover data, the market
-service can return predefined fallback mover values.
+scan of every NSE-listed stock. Yahoo Finance is used when Twelve Data does not return
+usable mover data. If neither provider returns data, the mover lists are empty.
 
 ### 25.2 Yahoo Finance
 
@@ -1068,8 +1067,7 @@ For dashboard indices, the normal external-provider order after a cache miss is:
 ```text
 Yahoo Finance
   -> Twelve Data for symbols missing from Yahoo
-  -> stale PostgreSQL value
-  -> predefined fallback value
+  -> omit symbols without a verified quote
 ```
 
 Yahoo Finance uses public HTTP endpoints and does not require a configured provider key.
@@ -1117,10 +1115,8 @@ Many dashboard requests check cached data before contacting an external provider
 ```text
 fresh PostgreSQL MarketCache or MarketQuote
   -> external provider
-  -> stale PostgreSQL value
-  -> predefined or synthetic fallback where that feature supports one
+  -> empty/unavailable response
 ```
 
-The exact order differs by endpoint. A stale database row, predefined fallback value, or
-synthetic history is not equivalent to live provider data and must be labeled or described
-accordingly.
+The exact order differs by endpoint. Provider data can be delayed, and short-lived cached
+values may reflect the last available market quote rather than a real-time tick.

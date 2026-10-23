@@ -18,7 +18,7 @@ npm install
 npm run dev
 ```
 
-The API is available at `http://localhost:8000`; the frontend is served by Vite. Set market provider and AI credentials in `backend/.env` as needed. The dashboard can use its market-data fallbacks when external provider credentials are unavailable; AI answers use deterministic market evidence when no LLM key is configured.
+The API is available at `http://localhost:8000`; the frontend is served by Vite. Set market provider and AI credentials in `backend/.env` as needed. If a market-data provider is unavailable, affected dashboard values are left empty rather than replaced with sample prices. AI answers require a configured LLM key.
 
 ## Product areas
 

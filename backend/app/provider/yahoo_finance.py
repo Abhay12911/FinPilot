@@ -89,6 +89,7 @@ async def fetch_quote(symbol: str) -> Optional[Dict[str, Any]]:
             "previous_close": float(prev) if prev else None,
             "change": float(change),
             "percent_change": float(change_pct),
+            "volume": int(meta.get("regularMarketVolume") or 0),
             "currency": meta.get("currency", "USD"),
             "exchange": meta.get("exchangeName", ""),
             "timestamp": meta.get("regularMarketTime"),
@@ -98,18 +99,20 @@ async def fetch_quote(symbol: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-async def search_symbols(query: str) -> List[Dict[str, Any]]:
-    """Find Yahoo symbols, preferring Indian NSE and BSE equities."""
+async def search_symbols(query: str, include_global: bool = False) -> List[Dict[str, Any]]:
+    """Find Yahoo equity symbols, preferring NSE/BSE unless global results are requested."""
     url = f"{YF_BASE}/v1/finance/search"
     try:
         async with httpx.AsyncClient(timeout=10, headers=YF_HEADERS) as client:
             response = await client.get(url, params={"q": query, "quotesCount": 15, "newsCount": 0})
             response.raise_for_status()
             quotes = response.json().get("quotes", [])
+        equities = [quote for quote in quotes if quote.get("quoteType") == "EQUITY"]
+        if include_global:
+            return equities
         return [
-            quote for quote in quotes
-            if quote.get("quoteType") == "EQUITY"
-            and (str(quote.get("symbol", "")).endswith(".NS") or str(quote.get("symbol", "")).endswith(".BO"))
+            quote for quote in equities
+            if str(quote.get("symbol", "")).endswith((".NS", ".BO"))
         ]
     except Exception as exc:
         logger.error("Yahoo Finance symbol search failed for %s: %s", query, exc)

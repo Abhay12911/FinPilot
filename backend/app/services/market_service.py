@@ -38,28 +38,6 @@ INDIA_SECTOR_INDICES = [
     ("Infrastructure", "NIFTYINFRA"),
 ]
 
-# Fallback values for Indices, Forex, and Commodities
-FALLBACK_INDEX_QUOTES = {
-    # India
-    "NIFTY50": {"name": "NIFTY 50", "price": 24850.20, "change": 182.40, "change_pct": 0.0074, "currency": "INR", "market": "India"},
-    "BANKNIFTY": {"name": "BANK NIFTY", "price": 51230.15, "change": 420.50, "change_pct": 0.0083, "currency": "INR", "market": "India"},
-    "SENSEX": {"name": "SENSEX", "price": 81240.10, "change": 490.30, "change_pct": 0.0061, "currency": "INR", "market": "India"},
-    # US
-    "SPX": {"name": "S&P 500", "price": 6450.20, "change": 52.40, "change_pct": 0.0082, "currency": "USD", "market": "USA"},
-    "COMP": {"name": "NASDAQ 100", "price": 21240.40, "change": 235.10, "change_pct": 0.0112, "currency": "USD", "market": "USA"},
-    "DJI": {"name": "Dow Jones", "price": 44210.50, "change": 150.20, "change_pct": 0.0034, "currency": "USD", "market": "USA"},
-    # Global
-    "VIX": {"name": "Volatility Index", "price": 17.42, "change": -0.58, "change_pct": -0.0321, "currency": "USD", "market": "Global"},
-    "USDINR": {"name": "USD/INR", "price": 83.95, "change": 0.12, "change_pct": 0.0014, "currency": "INR", "market": "Global"},
-    "EURUSD": {"name": "EUR/USD", "price": 1.085, "change": -0.002, "change_pct": -0.0018, "currency": "USD", "market": "Global"},
-    "GBPUSD": {"name": "GBP/USD", "price": 1.3120, "change": 0.0025, "change_pct": 0.0019, "currency": "USD", "market": "Global"},
-    "USDJPY": {"name": "USD/JPY", "price": 144.50, "change": -0.85, "change_pct": -0.0058, "currency": "JPY", "market": "Global"},
-    "GOLD": {"name": "Gold", "price": 2510.40, "change": 15.60, "change_pct": 0.0062, "currency": "USD", "market": "Global"},
-    "SILVER": {"name": "Silver", "price": 28.95, "change": 0.42, "change_pct": 0.0147, "currency": "USD", "market": "Global"},
-    "CRUDE": {"name": "Crude Oil", "price": 74.20, "change": -1.10, "change_pct": -0.0146, "currency": "USD", "market": "Global"},
-    "GAS": {"name": "Natural Gas", "price": 2.15, "change": -0.08, "change_pct": -0.0358, "currency": "USD", "market": "Global"}
-}
-
 def _get_api_key() -> Optional[str]:
     """Return a configured Twelve Data key, or ``None`` when unavailable."""
     key = (settings.TWELVE_DATA_KEY or "").strip()
@@ -130,10 +108,6 @@ def _get_quote_from_db(db: Session, symbol: str) -> Optional[MarketQuote]:
         MarketQuote.symbol == symbol,
         MarketQuote.updated_at >= cutoff
     ).first()
-
-def _get_stale_quote_from_db(db: Session, symbol: str) -> Optional[MarketQuote]:
-    """Retrieve quote from the db regardless of age."""
-    return db.query(MarketQuote).filter(MarketQuote.symbol == symbol).first()
 
 def _save_quote_to_db(db: Session, symbol: str, q: Dict[str, Any], market: str, asset_type: str) -> MarketQuote:
     """Save or update quote details in database."""
@@ -335,26 +309,7 @@ async def get_indices(db: Session, force: bool = False) -> Dict[str, List[Dict[s
                 db_quote = _save_quote_to_db(db, sym, q, market, asset_type)
                 batch_data[sym] = db_quote
             else:
-                # Call fallback database quote (even if expired)
-                db_quote = _get_stale_quote_from_db(db, sym)
-                if db_quote:
-                    batch_data[sym] = db_quote
-                else:
-                    # Final mock fallback
-                    fb = FALLBACK_INDEX_QUOTES.get(sym, {})
-                    if not fb:
-                        logger.warning("No live, stale, or fallback quote is available for index %s", sym)
-                        continue
-                    batch_data[sym] = MarketQuote(
-                        symbol=sym,
-                        name=fb.get("name", sym),
-                        price=fb.get("price", 0.0),
-                        change=fb.get("change", 0.0),
-                        change_percent=fb.get("change_pct", 0.0),
-                        currency=fb.get("currency", "USD"),
-                        market=fb.get("market", "Global"),
-                        timestamp=datetime.utcnow()
-                    )
+                logger.warning("No provider quote is available for index %s", sym)
                     
     # Format and group response
     result = {"india": [], "usa": [], "global_markets": []}
@@ -385,14 +340,37 @@ async def get_quote(db: Session, symbol: str) -> Optional[MarketQuote]:
       1. DB cache (fresh within CACHE_TTL_MINUTES)
       2. Yahoo Finance (free, no API key needed, works for equities + indices)
       3. Twelve Data (requires API key, secondary source)
-      4. Stale DB record (any age, last resort)
+      4. No quote when providers have no verified data
     """
+    from app.models.stock import Stock
+
+    requested_symbol = symbol.strip().upper()
+    normalized_symbol = requested_symbol
+    stock = db.query(Stock).filter(
+        (Stock.ticker == normalized_symbol) | (Stock.symbol == normalized_symbol)
+    ).first()
+    if stock:
+        symbol = stock.symbol
+        twelve_symbol = f"{stock.ticker}:{stock.exchange}"
+    elif normalized_symbol.endswith(":NSE"):
+        symbol = f"{normalized_symbol[:-4]}.NS"
+        twelve_symbol = normalized_symbol
+    elif normalized_symbol.endswith(":BSE"):
+        symbol = f"{normalized_symbol[:-4]}.BO"
+        twelve_symbol = normalized_symbol
+    elif normalized_symbol.endswith(".NS"):
+        twelve_symbol = f"{normalized_symbol[:-3]}:NSE"
+    elif normalized_symbol.endswith(".BO"):
+        twelve_symbol = f"{normalized_symbol[:-3]}:BSE"
+    else:
+        twelve_symbol = requested_symbol
+
     cached = _get_quote_from_db(db, symbol)
     if cached:
         return cached
 
     sym_upper = symbol.upper()
-    market = "India" if sym_upper in INDIA_INDEX_NAMES else "USA"
+    market = "India" if sym_upper in INDIA_INDEX_NAMES or sym_upper.endswith((".NS", ".BO")) else "USA"
     asset_type = "equity"
     if "/" in symbol or sym_upper in ["EURUSD", "USDINR", "GBPUSD", "USDJPY"]:
         asset_type = "forex"
@@ -411,21 +389,16 @@ async def get_quote(db: Session, symbol: str) -> Optional[MarketQuote]:
     # 2. Fall back to Twelve Data
     api_key = _get_api_key()
     if api_key:
-        q = await twelve_data.fetch_quote(api_key, symbol)
+        q = await twelve_data.fetch_quote(api_key, twelve_symbol)
         if q and q.get("price"):
             return _save_quote_to_db(db, symbol, q, market, asset_type)
-
-    # 3. Return stale DB record rather than nothing
-    stale = _get_stale_quote_from_db(db, symbol)
-    if stale:
-        return stale
 
     return None
 
 
 async def get_movers(db: Session, market: str, force: bool = False) -> Dict[str, List[Dict[str, Any]]]:
     """Fetch top gainers, top losers, and most active assets for a market (india / usa)."""
-    cache_key = f"movers_{market.lower()}"
+    cache_key = f"movers_v2_{market.lower()}"
     cached = None if force else _get_cache_value(db, cache_key, CACHE_TTL_MINUTES)
     if cached:
         return cached
@@ -439,11 +412,17 @@ async def get_movers(db: Session, market: str, force: bool = False) -> Dict[str,
     # Fetch from Twelve Data
     if api_key:
         quotes = await twelve_data.fetch_batch_quotes(api_key, symbols)
+
+    yahoo_symbols = {
+        sym: sym.replace(":NSE", ".NS") if market.lower() == "india" else sym
+        for sym in symbols
+    }
+    yahoo_quotes = await yahoo_finance.fetch_batch_quotes(list(yahoo_symbols.values()))
         
     movers_list = []
     for sym in symbols:
         td_sym = twelve_data.get_td_symbol(sym)
-        q = quotes.get(td_sym)
+        q = quotes.get(td_sym) or yahoo_quotes.get(yahoo_symbols[sym])
         if q and q.get("price"):
             try:
                 change_pct = float(q.get("percent_change", 0))
@@ -462,25 +441,6 @@ async def get_movers(db: Session, market: str, force: bool = False) -> Dict[str,
             except Exception:
                 pass
                 
-    # If API fails or rate-limited, provide fallback mock movers
-    if not movers_list:
-        if market.lower() == "india":
-            movers_list = [
-                {"symbol": "RELIANCE", "name": "Reliance Industries", "price": 2980.50, "change": 45.20, "change_percent": 1.54, "volume": 5201928, "exchange": "NSE"},
-                {"symbol": "TCS", "name": "Tata Consultancy Services", "price": 4120.00, "change": 85.00, "change_percent": 2.11, "volume": 1289382, "exchange": "NSE"},
-                {"symbol": "HDFCBANK", "name": "HDFC Bank Ltd", "price": 1640.20, "change": -22.50, "change_percent": -1.35, "volume": 8902817, "exchange": "NSE"},
-                {"symbol": "INFY", "name": "Infosys Ltd", "price": 1820.40, "change": 38.10, "change_percent": 2.14, "volume": 3410291, "exchange": "NSE"},
-                {"symbol": "SBIN", "name": "State Bank of India", "price": 810.15, "change": -12.40, "change_percent": -1.51, "volume": 6789102, "exchange": "NSE"}
-            ]
-        else:
-            movers_list = [
-                {"symbol": "NVDA", "name": "NVIDIA Corporation", "price": 182.45, "change": 8.45, "change_percent": 4.87, "volume": 42392821, "exchange": "NASDAQ"},
-                {"symbol": "META", "name": "Meta Platforms Inc", "price": 609.30, "change": 18.90, "change_percent": 3.21, "volume": 15672901, "exchange": "NASDAQ"},
-                {"symbol": "AAPL", "name": "Apple Inc", "price": 231.40, "change": -0.97, "change_percent": -0.42, "volume": 28938201, "exchange": "NASDAQ"},
-                {"symbol": "TSLA", "name": "Tesla Inc", "price": 248.80, "change": -8.32, "change_percent": -3.24, "volume": 35671029, "exchange": "NASDAQ"},
-                {"symbol": "INTC", "name": "Intel Corp", "price": 22.15, "change": -0.49, "change_percent": -2.18, "volume": 19827301, "exchange": "NASDAQ"}
-            ]
-            
     # Sort
     gainers = sorted([m for m in movers_list if m["change_percent"] > 0], key=lambda x: x["change_percent"], reverse=True)
     losers = sorted([m for m in movers_list if m["change_percent"] < 0], key=lambda x: x["change_percent"])
@@ -498,7 +458,7 @@ async def get_movers(db: Session, market: str, force: bool = False) -> Dict[str,
 async def get_sectors(db: Session, market: str, force: bool = False) -> List[Dict[str, Any]]:
     """Return sector performances for the market (US / India)."""
     api_key = _get_api_key()
-    cache_key = f"sectors_v2_{market.lower()}"
+    cache_key = f"sectors_v3_{market.lower()}"
     cached = None if force else _get_cache_value(db, cache_key, CACHE_TTL_MINUTES)
     if cached:
         return cached
@@ -547,29 +507,6 @@ async def get_sectors(db: Session, market: str, force: bool = False) -> List[Dic
         except Exception:
             pass
 
-    # High-quality fallback data if API failed, was demo or returned empty list
-    if not response:
-        ts = datetime.utcnow().isoformat()
-        if market.lower() == "india":
-            response = [
-                {"sector": "IT & Software", "change_percent": 1.42, "market": "india", "timestamp": ts},
-                {"sector": "Banking & Finance", "change_percent": 0.82, "market": "india", "timestamp": ts},
-                {"sector": "Automobile", "change_percent": 0.95, "market": "india", "timestamp": ts},
-                {"sector": "Metal & Mining", "change_percent": 1.25, "market": "india", "timestamp": ts},
-                {"sector": "Pharmaceuticals", "change_percent": -0.32, "market": "india", "timestamp": ts},
-                {"sector": "Energy & Utilities", "change_percent": -0.62, "market": "india", "timestamp": ts}
-            ]
-        else:
-            response = [
-                {"sector": "Technology", "change_percent": 2.42, "market": "usa", "timestamp": ts},
-                {"sector": "Communication Services", "change_percent": 1.15, "market": "usa", "timestamp": ts},
-                {"sector": "Consumer Cyclical", "change_percent": 0.92, "market": "usa", "timestamp": ts},
-                {"sector": "Industrials", "change_percent": 0.52, "market": "usa", "timestamp": ts},
-                {"sector": "Financials", "change_percent": 0.38, "market": "usa", "timestamp": ts},
-                {"sector": "Healthcare", "change_percent": -0.22, "market": "usa", "timestamp": ts},
-                {"sector": "Energy", "change_percent": -1.24, "market": "usa", "timestamp": ts},
-                {"sector": "Utilities", "change_percent": -0.32, "market": "usa", "timestamp": ts}
-            ]
     # Also serialize any datetime timestamps from real API data
     for sec in response:
         if isinstance(sec.get("timestamp"), datetime):
@@ -604,13 +541,14 @@ async def get_history(
     force: bool = False
 ) -> List[Dict[str, Any]]:
     """Fetch historical OHLCV data for an asset with local key-value caching."""
-    cache_key = f"history_{symbol}_{interval}_{outputsize}"
+    cache_key = f"history_v2_{symbol}_{interval}_{outputsize}"
     cached = None if force else _get_cache_value(db, cache_key, HISTORY_CACHE_TTL_MINUTES)
     if cached:
         return cached
         
     api_key = _get_api_key()
-    history = await yahoo_finance.fetch_history(symbol, interval, outputsize)
+    yahoo_symbol = symbol.upper().replace(":NSE", ".NS").replace(":BSE", ".BO")
+    history = await yahoo_finance.fetch_history(yahoo_symbol, interval, outputsize)
     if not history and api_key:
         history = await twelve_data.fetch_history(api_key, symbol, interval, outputsize)
     
@@ -639,47 +577,6 @@ async def get_history(
     # Sort chronological
     response.sort(key=lambda x: x["timestamp"])
     
-    # If API call returned no data, provide realistic fallback history for main indices
-    if not response:
-        import random
-        fb_quote = FALLBACK_INDEX_QUOTES.get(symbol.upper())
-        current_val = fb_quote.get("price", 100.0) if fb_quote else 150.0
-        now = datetime.utcnow()
-        # Seed based on symbol for reproducibility
-        rng = random.Random(hash(symbol) % (2**31))
-        # Walk backwards from current value, skipping weekends
-        days_walked = 0
-        points = []
-        d = now
-        while days_walked < outputsize:
-            d = d - timedelta(days=1)
-            # Skip weekends for stock data
-            if d.weekday() >= 5:
-                continue
-            days_walked += 1
-            points.append(d)
-        points.reverse()
-        
-        # Forward walk from a seeded starting price with upward drift
-        daily_drift = 0.0003  # ~0.03% daily average gain (realistic)
-        vol = 0.008  # ~0.8% daily volatility
-        start_price = current_val * (1 - daily_drift * len(points))
-        price = start_price
-        for ts in points:
-            daily_return = daily_drift + rng.gauss(0, vol)
-            price = price * (1 + daily_return)
-            open_p = price * (1 + rng.gauss(0, 0.002))
-            high_p = max(price, open_p) * (1 + abs(rng.gauss(0, 0.003)))
-            low_p = min(price, open_p) * (1 - abs(rng.gauss(0, 0.003)))
-            response.append({
-                "timestamp": ts.replace(hour=16, minute=0, second=0),
-                "open": round(open_p, 4),
-                "high": round(high_p, 4),
-                "low": round(low_p, 4),
-                "close": round(price, 4),
-                "volume": rng.randint(1_500_000, 8_000_000)
-            })
-
     # Serialize timestamps to ISO strings for JSON compatibility
     for pt in response:
         if isinstance(pt.get("timestamp"), datetime):
